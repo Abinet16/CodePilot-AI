@@ -1,0 +1,389 @@
+// CodePilot AI data model. See docs/architecture/data-model.md for rationale.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum InstallationStatus {
+  ACTIVE
+  SUSPENDED
+  DELETED
+}
+
+enum IssueState {
+  OPEN
+  CLOSED
+}
+
+// Mirrors TaskStatus in @codepilot/contracts. Transitions are enforced in code.
+enum TaskStatus {
+  QUEUED
+  ANALYZING
+  PLANNING
+  AWAITING_PLAN_APPROVAL
+  GENERATING_PATCH
+  RUNNING_CHECKS
+  REPAIRING
+  READY_FOR_REVIEW
+  OPENING_PR
+  PR_OPENED
+  FAILED
+  CANCELLED
+}
+
+enum RunStatus {
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+enum PatchStatus {
+  PROPOSED
+  VERIFIED
+  REJECTED
+  SUPERSEDED
+  SUBMITTED
+}
+
+enum TestRunStatus {
+  QUEUED
+  RUNNING
+  PASSED
+  FAILED
+  ERRORED
+  TIMED_OUT
+}
+
+enum PullRequestStatus {
+  DRAFT
+  OPEN
+  CLOSED
+  MERGED
+}
+
+enum IdempotencyState {
+  IN_PROGRESS
+  COMPLETED
+}
+
+model User {
+  id          String   @id @default(uuid()) @db.Uuid
+  githubId    BigInt   @unique @map("github_id")
+  githubLogin String   @map("github_login")
+  name        String?
+  email       String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  installations GithubInstallation[]
+  tasks         AgentTask[]
+  auditLogs     AuditLog[]
+  usageRecords  UsageRecord[]
+
+  @@map("users")
+}
+
+model GithubInstallation {
+  id             String             @id @default(uuid()) @db.Uuid
+  userId         String             @map("user_id") @db.Uuid
+  installationId BigInt             @unique @map("installation_id")
+  accountLogin   String             @map("account_login")
+  status         InstallationStatus @default(ACTIVE)
+  createdAt      DateTime           @default(now()) @map("created_at")
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  repositories Repository[]
+
+  @@index([userId])
+  @@map("github_installations")
+}
+
+model Repository {
+  id             String   @id @default(uuid()) @db.Uuid
+  installationId String   @map("installation_id") @db.Uuid
+  githubRepoId   BigInt   @unique @map("github_repo_id")
+  owner          String
+  name           String
+  defaultBranch  String   @map("default_branch")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  installation GithubInstallation  @relation(fields: [installationId], references: [id], onDelete: Cascade)
+  settings     RepositorySettings?
+  issues       Issue[]
+  tasks        AgentTask[]
+  files        RepositoryFile[]
+
+  @@unique([owner, name])
+  @@index([installationId])
+  @@map("repositories")
+}
+
+model RepositorySettings {
+  id              String @id @default(uuid()) @db.Uuid
+  repositoryId    String @unique @map("repository_id") @db.Uuid
+  /// CommandProfile[] validated by @codepilot/agent-core before save.
+  allowedCommands Json   @default("[]") @map("allowed_commands")
+  /// Ordered command profile ids executed during RUNNING_CHECKS.
+  testCommands    Json   @default("[]") @map("test_commands")
+  policyConfig    Json   @default("{}") @map("policy_config")
+
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@map("repository_settings")
+}
+
+model Issue {
+  id                String     @id @default(uuid()) @db.Uuid
+  repositoryId      String     @map("repository_id") @db.Uuid
+  githubIssueNumber Int        @map("github_issue_number")
+  title             String
+  body              String?
+  state             IssueState @default(OPEN)
+  updatedAt         DateTime   @updatedAt @map("updated_at")
+
+  repository Repository  @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  tasks      AgentTask[]
+
+  @@unique([repositoryId, githubIssueNumber])
+  @@map("issues")
+}
+
+model AgentTask {
+  id                  String     @id @default(uuid()) @db.Uuid
+  repositoryId        String     @map("repository_id") @db.Uuid
+  issueId             String?    @map("issue_id") @db.Uuid
+  requestedById       String     @map("requested_by") @db.Uuid
+  description         String?
+  requirePlanApproval Boolean    @default(true) @map("require_plan_approval")
+  status              TaskStatus @default(QUEUED)
+  /// Exact commit the agent analyzed; pinned during ANALYZING.
+  baseSha             String?    @map("base_sha")
+  branchName          String?    @map("branch_name")
+  failureReason       String?    @map("failure_reason")
+  createdAt           DateTime   @default(now()) @map("created_at")
+  startedAt           DateTime?  @map("started_at")
+  completedAt         DateTime?  @map("completed_at")
+
+  repository   Repository             @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  issue        Issue?                 @relation(fields: [issueId], references: [id], onDelete: SetNull)
+  requestedBy  User                   @relation(fields: [requestedById], references: [id])
+  runs         AgentRun[]
+  plans        ImplementationPlan[]
+  patches      Patch[]
+  testRuns     TestRun[]
+  pullRequests PullRequest[]
+  events       TaskEvent[]
+  auditLogs    AuditLog[]
+  usageRecords UsageRecord[]
+
+  @@unique([repositoryId, branchName])
+  @@index([status])
+  @@index([requestedById, createdAt])
+  @@map("agent_tasks")
+}
+
+model AgentRun {
+  id            String    @id @default(uuid()) @db.Uuid
+  taskId        String    @map("task_id") @db.Uuid
+  attemptNumber Int       @map("attempt_number")
+  model         String
+  status        RunStatus @default(RUNNING)
+  tokenUsage    Json      @default("{}") @map("token_usage")
+  startedAt     DateTime  @default(now()) @map("started_at")
+  completedAt   DateTime? @map("completed_at")
+
+  task    AgentTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  patches Patch[]
+
+  @@unique([taskId, attemptNumber])
+  @@map("agent_runs")
+}
+
+model ImplementationPlan {
+  id         String    @id @default(uuid()) @db.Uuid
+  taskId     String    @map("task_id") @db.Uuid
+  version    Int
+  /// ImplementationPlan from @codepilot/contracts, validated before insert.
+  planJson   Json      @map("plan_json")
+  approvedAt DateTime? @map("approved_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  task AgentTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, version])
+  @@map("implementation_plans")
+}
+
+model RepositoryFile {
+  id           String   @id @default(uuid()) @db.Uuid
+  repositoryId String   @map("repository_id") @db.Uuid
+  commitSha    String   @map("commit_sha")
+  path         String
+  contentHash  String   @map("content_hash")
+  language     String?
+  indexedAt    DateTime @default(now()) @map("indexed_at")
+
+  repository Repository  @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  chunks     CodeChunk[]
+
+  @@unique([repositoryId, commitSha, path])
+  @@map("repository_files")
+}
+
+model CodeChunk {
+  id               String @id @default(uuid()) @db.Uuid
+  repositoryFileId String @map("repository_file_id") @db.Uuid
+  chunkIndex       Int    @map("chunk_index")
+  startLine        Int    @map("start_line")
+  endLine          Int    @map("end_line")
+  content          String
+  // Full-text search vector and optional embedding are added via raw SQL migration.
+
+  file RepositoryFile @relation(fields: [repositoryFileId], references: [id], onDelete: Cascade)
+
+  @@unique([repositoryFileId, chunkIndex])
+  @@map("code_chunks")
+}
+
+model Patch {
+  id           String      @id @default(uuid()) @db.Uuid
+  taskId       String      @map("task_id") @db.Uuid
+  runId        String      @map("run_id") @db.Uuid
+  baseSha      String      @map("base_sha")
+  patchContent String      @map("patch_content")
+  diffHash     String      @map("diff_hash")
+  status       PatchStatus @default(PROPOSED)
+  createdAt    DateTime    @default(now()) @map("created_at")
+
+  task     AgentTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  run      AgentRun  @relation(fields: [runId], references: [id], onDelete: Cascade)
+  testRuns TestRun[]
+
+  @@unique([taskId, diffHash])
+  @@map("patches")
+}
+
+model TestRun {
+  id          String        @id @default(uuid()) @db.Uuid
+  taskId      String        @map("task_id") @db.Uuid
+  patchId     String?       @map("patch_id") @db.Uuid
+  runnerImage String        @map("runner_image")
+  status      TestRunStatus @default(QUEUED)
+  exitCode    Int?          @map("exit_code")
+  startedAt   DateTime?     @map("started_at")
+  completedAt DateTime?     @map("completed_at")
+
+  task    AgentTask    @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  patch   Patch?       @relation(fields: [patchId], references: [id], onDelete: SetNull)
+  results TestResult[]
+
+  @@index([taskId])
+  @@map("test_runs")
+}
+
+model TestResult {
+  id            String  @id @default(uuid()) @db.Uuid
+  testRunId     String  @map("test_run_id") @db.Uuid
+  command       String
+  exitCode      Int?    @map("exit_code")
+  /// Bounded, sanitized summary. Full logs live in object storage.
+  outputSummary String  @map("output_summary")
+  logObjectKey  String? @map("log_object_key")
+  durationMs    Int     @map("duration_ms")
+
+  testRun TestRun @relation(fields: [testRunId], references: [id], onDelete: Cascade)
+
+  @@map("test_results")
+}
+
+model PullRequest {
+  id             String            @id @default(uuid()) @db.Uuid
+  taskId         String            @map("task_id") @db.Uuid
+  repositoryId   String            @map("repository_id") @db.Uuid
+  githubPrNumber Int               @map("github_pr_number")
+  githubPrUrl    String            @map("github_pr_url")
+  headSha        String            @map("head_sha")
+  status         PullRequestStatus @default(DRAFT)
+  createdAt      DateTime          @default(now()) @map("created_at")
+
+  task AgentTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@unique([repositoryId, githubPrNumber])
+  @@map("pull_requests")
+}
+
+model TaskEvent {
+  id         String      @id @default(uuid()) @db.Uuid
+  taskId     String      @map("task_id") @db.Uuid
+  eventType  String      @map("event_type")
+  fromStatus TaskStatus? @map("from_status")
+  toStatus   TaskStatus? @map("to_status")
+  payload    Json        @default("{}")
+  createdAt  DateTime    @default(now()) @map("created_at")
+
+  task AgentTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId, createdAt])
+  @@map("task_events")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String?  @map("user_id") @db.Uuid
+  taskId    String?  @map("task_id") @db.Uuid
+  action    String
+  metadata  Json     @default("{}")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User?      @relation(fields: [userId], references: [id], onDelete: SetNull)
+  task AgentTask? @relation(fields: [taskId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([taskId])
+  @@map("audit_logs")
+}
+
+model UsageRecord {
+  id            String   @id @default(uuid()) @db.Uuid
+  userId        String   @map("user_id") @db.Uuid
+  taskId        String?  @map("task_id") @db.Uuid
+  provider      String
+  model         String
+  inputTokens   Int      @map("input_tokens")
+  outputTokens  Int      @map("output_tokens")
+  estimatedCost Decimal  @map("estimated_cost") @db.Decimal(12, 6)
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  user User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  task AgentTask? @relation(fields: [taskId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@map("usage_records")
+}
+
+/// Guards external side effects (push, PR creation) against retries and worker restarts.
+model IdempotencyKey {
+  key         String           @id
+  scope       String
+  state       IdempotencyState @default(IN_PROGRESS)
+  result      Json?
+  createdAt   DateTime         @default(now()) @map("created_at")
+  completedAt DateTime?        @map("completed_at")
+
+  @@map("idempotency_keys")
+}
+
+/// GitHub may deliver a webhook more than once; the delivery id dedupes it.
+model WebhookDelivery {
+  deliveryId  String    @id @map("delivery_id")
+  event       String
+  receivedAt  DateTime  @default(now()) @map("received_at")
+  processedAt DateTime? @map("processed_at")
+
+  @@map("webhook_deliveries")
+}
