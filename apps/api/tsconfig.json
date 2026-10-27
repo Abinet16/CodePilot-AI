@@ -1,0 +1,11 @@
+{
+  "extends": "../../packages/config/tsconfig.nest.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "types": ["node", "jest"],
+    "paths": {
+      "@codepilot/contracts": ["../../packages/contracts/src/index.ts"]
+    }
+  },
+  "include": ["src", "test"]
+}
