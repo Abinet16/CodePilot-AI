@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.next/
+coverage/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+.DS_Store
+# Agent workspaces are disposable and must never be committed
+.workspaces/
