@@ -1,0 +1,23 @@
+{
+  "name": "@codepilot/web",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "build": "next build",
+    "dev": "next dev --port 3000",
+    "start": "next start --port 3000",
+    "typecheck": "tsc --noEmit",
+    "test": "echo \"web: no unit tests yet (Playwright e2e lands in week 8)\""
+  },
+  "dependencies": {
+    "@codepilot/contracts": "workspace:*",
+    "next": "15.5.28",
+    "react": "19.1.10",
+    "react-dom": "19.1.10"
+  },
+  "devDependencies": {
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "typescript": "5.9.3"
+  }
+}
