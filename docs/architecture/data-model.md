@@ -4,8 +4,10 @@ Schema: `prisma/schema.prisma`. Initial migration: `prisma/migrations/2026102700
 
 ```mermaid
 erDiagram
-  users ||--o{ github_installations : installs
-  github_installations ||--o{ repositories : grants
+  users ||--o{ sessions : holds
+  github_installations ||--o{ repositories : contains
+  users ||--o{ repository_access : "granted by GitHub"
+  repositories ||--o{ repository_access : "visible to"
   repositories ||--o| repository_settings : configures
   repositories ||--o{ issues : has
   repositories ||--o{ repository_files : "indexed at commit"
@@ -29,6 +31,8 @@ erDiagram
 | Constraint | Why |
 | --- | --- |
 | `repositories.github_repo_id` unique | Repos are renamed and transferred; the numeric id is stable |
+| `repository_access (user_id, repository_id)` primary key | One permission per user per repository, rebuilt from GitHub at sign-in ([ADR 0003](../decisions/0003-github-derived-access-and-opaque-sessions.md)) |
+| `sessions.token_hash` unique | Lookup by hash; the raw token never touches the database |
 | `issues (repository_id, github_issue_number)` unique | Webhook redelivery and re-import must upsert, not duplicate |
 | `agent_runs (task_id, attempt_number)` unique | One row per bounded attempt; retries can't collide |
 | `agent_tasks (repository_id, branch_name)` unique | Two tasks can never push to the same branch (NULLs allowed until a branch is assigned) |
@@ -40,5 +44,6 @@ erDiagram
 
 - `agent_tasks.base_sha` and `patches.base_sha` record exactly which commit was analyzed and patched.
 - `test_results.output_summary` is bounded and sanitized; full logs go to object storage via `log_object_key`.
-- No credential or token column exists anywhere. Installation tokens are minted on demand and held in memory only.
+- No credential or token column exists anywhere. Session tokens are stored only as SHA-256 hashes; GitHub user tokens are never stored; installation tokens are minted on demand and held in memory only.
+- Repositories leaving an installation are soft-removed (`removed_at`) and disabled, so task history is preserved.
 - `repository_files` and `code_chunks` are **derived, versioned** data keyed by `commit_sha`, safe to drop and rebuild. Full-text (`tsvector`) and optional embedding columns arrive via raw SQL migration in week 3.

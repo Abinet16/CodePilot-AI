@@ -12,7 +12,8 @@ issue → analyze repo (pinned SHA) → structured plan → [human approves] →
 | Release | Outcome | State |
 | --- | --- | --- |
 | Week 1 | Monorepo, schema, state machine, safety policies, CI | ✅ done |
-| `v0.1` | Secure GitHub connection and repository analysis | ⏳ weeks 2–3 |
+| Week 2 | GitHub sign-in, GitHub App, webhooks, repository access, audit log | ✅ done |
+| `v0.1` | Secure GitHub connection and repository analysis | ⏳ week 3 |
 | `v0.2` | Structured plans and patch generation | ⏳ weeks 4–5 |
 | `v0.3` | Sandboxed tests and bounded repair loop | ⏳ week 6 |
 | `v0.4` | Automated draft pull requests | ⏳ week 7 |
@@ -46,6 +47,8 @@ pnpm dev                # web :3000, api :4000/api, worker
 
 Check `http://localhost:4000/api/health`, or open `http://localhost:3000` to see system status.
 
+To sign in and connect repositories, create a GitHub App first: see [docs/api/github-app-setup.md](docs/api/github-app-setup.md). Without one, GitHub routes return `503` in development. Endpoints are listed in [docs/api/endpoints.md](docs/api/endpoints.md).
+
 ## Quality gates
 
 ```bash
@@ -59,6 +62,7 @@ CI (`.github/workflows/ci.yml`) runs all of the above, plus a schema-drift check
 
 ## Safety principles
 
+- Repository access comes only from GitHub, checked with the user's own token at sign-in. Webhooks can revoke access but never grant it.
 - The model never chooses shell commands or raw file paths unchecked. It picks a **command profile id**, and every proposed path is normalized and symlink-checked against the workspace.
 - Secrets, `.git`, and CI workflow files are not writable by the agent.
 - Queue jobs carry identifiers only. Credentials are minted on demand and never persisted.
