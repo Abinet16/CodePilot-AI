@@ -11,7 +11,7 @@ describe("TaskStateStore (PostgreSQL)", () => {
     const suffix = Date.now();
     const user = await prisma.user.create({ data: { githubId: BigInt(suffix), githubLogin: `user-${suffix}` } });
     const installation = await prisma.githubInstallation.create({
-      data: { userId: user.id, installationId: BigInt(suffix), accountLogin: user.githubLogin },
+      data: { installationId: BigInt(suffix), accountLogin: user.githubLogin },
     });
     const repo = await prisma.repository.create({
       data: {
