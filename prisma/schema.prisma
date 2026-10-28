@@ -72,55 +72,103 @@ enum IdempotencyState {
   COMPLETED
 }
 
+/// The user's own permission on a repository, as reported by GitHub.
+enum RepositoryPermission {
+  READ
+  TRIAGE
+  WRITE
+  MAINTAIN
+  ADMIN
+}
+
 model User {
   id          String   @id @default(uuid()) @db.Uuid
   githubId    BigInt   @unique @map("github_id")
   githubLogin String   @map("github_login")
   name        String?
   email       String?
+  avatarUrl   String?  @map("avatar_url")
   createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
 
-  installations GithubInstallation[]
-  tasks         AgentTask[]
-  auditLogs     AuditLog[]
-  usageRecords  UsageRecord[]
+  sessions         Session[]
+  repositoryAccess RepositoryAccess[]
+  tasks            AgentTask[]
+  auditLogs        AuditLog[]
+  usageRecords     UsageRecord[]
 
   @@map("users")
 }
 
+/// Opaque session tokens. Only the SHA-256 hash is stored.
+model Session {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @unique @map("token_hash")
+  createdAt DateTime  @default(now()) @map("created_at")
+  expiresAt DateTime  @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+/// An installation may be shared by many users (e.g. an organization).
+/// Which users can see which repositories lives in repository_access.
 model GithubInstallation {
   id             String             @id @default(uuid()) @db.Uuid
-  userId         String             @map("user_id") @db.Uuid
   installationId BigInt             @unique @map("installation_id")
   accountLogin   String             @map("account_login")
   status         InstallationStatus @default(ACTIVE)
   createdAt      DateTime           @default(now()) @map("created_at")
+  updatedAt      DateTime           @default(now()) @updatedAt @map("updated_at")
 
-  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   repositories Repository[]
 
-  @@index([userId])
   @@map("github_installations")
 }
 
 model Repository {
-  id             String   @id @default(uuid()) @db.Uuid
-  installationId String   @map("installation_id") @db.Uuid
-  githubRepoId   BigInt   @unique @map("github_repo_id")
+  id             String    @id @default(uuid()) @db.Uuid
+  installationId String    @map("installation_id") @db.Uuid
+  githubRepoId   BigInt    @unique @map("github_repo_id")
   owner          String
   name           String
-  defaultBranch  String   @map("default_branch")
-  createdAt      DateTime @default(now()) @map("created_at")
+  defaultBranch  String    @map("default_branch")
+  isPrivate      Boolean   @default(true) @map("is_private")
+  /// Explicit opt-in: the agent only works on repositories a user enabled.
+  enabled        Boolean   @default(false)
+  /// Set when the repository leaves the installation; history is kept.
+  removedAt      DateTime? @map("removed_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
 
   installation GithubInstallation  @relation(fields: [installationId], references: [id], onDelete: Cascade)
+  access       RepositoryAccess[]
   settings     RepositorySettings?
   issues       Issue[]
   tasks        AgentTask[]
   files        RepositoryFile[]
 
-  @@unique([owner, name])
+  @@index([owner, name])
   @@index([installationId])
   @@map("repositories")
+}
+
+/// Granted only from a GitHub-verified user token at login; never from webhooks.
+model RepositoryAccess {
+  userId       String               @map("user_id") @db.Uuid
+  repositoryId String               @map("repository_id") @db.Uuid
+  permission   RepositoryPermission
+  syncedAt     DateTime             @default(now()) @map("synced_at")
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@id([userId, repositoryId])
+  @@index([repositoryId])
+  @@map("repository_access")
 }
 
 model RepositorySettings {
@@ -144,7 +192,7 @@ model Issue {
   title             String
   body              String?
   state             IssueState @default(OPEN)
-  updatedAt         DateTime   @updatedAt @map("updated_at")
+  updatedAt         DateTime   @default(now()) @updatedAt @map("updated_at")
 
   repository Repository  @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
   tasks      AgentTask[]
@@ -169,9 +217,9 @@ model AgentTask {
   startedAt           DateTime?  @map("started_at")
   completedAt         DateTime?  @map("completed_at")
 
-  repository   Repository             @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
-  issue        Issue?                 @relation(fields: [issueId], references: [id], onDelete: SetNull)
-  requestedBy  User                   @relation(fields: [requestedById], references: [id])
+  repository   Repository           @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  issue        Issue?               @relation(fields: [issueId], references: [id], onDelete: SetNull)
+  requestedBy  User                 @relation(fields: [requestedById], references: [id])
   runs         AgentRun[]
   plans        ImplementationPlan[]
   patches      Patch[]
