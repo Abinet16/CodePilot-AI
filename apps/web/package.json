@@ -13,7 +13,8 @@
     "@codepilot/contracts": "workspace:*",
     "next": "15.5.28",
     "react": "19.1.10",
-    "react-dom": "19.1.10"
+    "react-dom": "19.1.10",
+    "server-only": "0.0.1"
   },
   "devDependencies": {
     "@types/react": "19.3.0",
