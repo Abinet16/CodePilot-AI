@@ -1,13 +1,12 @@
-import { Global, Module } from "@nestjs/common";
-import { API_CONFIG, loadConfig } from "./config";
+import { Module } from "@nestjs/common";
+import { AuthModule } from "./auth/auth.module";
+import { CoreModule } from "./core.module";
+import { GithubModule } from "./github/github.module";
 import { HealthController } from "./health/health.controller";
-import { PrismaService } from "./prisma/prisma.service";
-import { redisProvider } from "./redis/redis.provider";
+import { RepositoriesModule } from "./repositories/repositories.module";
 
-@Global()
 @Module({
+  imports: [CoreModule, AuthModule, GithubModule, RepositoriesModule],
   controllers: [HealthController],
-  providers: [{ provide: API_CONFIG, useFactory: () => loadConfig() }, PrismaService, redisProvider],
-  exports: [API_CONFIG, PrismaService, redisProvider],
 })
 export class AppModule {}
