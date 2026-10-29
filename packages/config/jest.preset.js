@@ -10,5 +10,6 @@ module.exports = {
   moduleNameMapper: {
     "^@codepilot/contracts$": "<rootDir>/../../packages/contracts/src/index.ts",
     "^@codepilot/agent-core$": "<rootDir>/../../packages/agent-core/src/index.ts",
+    "^@codepilot/github$": "<rootDir>/../../packages/github/src/index.ts",
   },
 };

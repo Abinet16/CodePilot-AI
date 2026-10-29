@@ -13,6 +13,7 @@
   "dependencies": {
     "@codepilot/agent-core": "workspace:*",
     "@codepilot/contracts": "workspace:*",
+    "@codepilot/github": "workspace:*",
     "@prisma/client": "6.19.3",
     "bullmq": "5.81.5",
     "ioredis": "5.11.1",

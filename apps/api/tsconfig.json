@@ -4,7 +4,8 @@
     "outDir": "dist",
     "types": ["node", "jest"],
     "paths": {
-      "@codepilot/contracts": ["../../packages/contracts/src/index.ts"]
+      "@codepilot/contracts": ["../../packages/contracts/src/index.ts"],
+      "@codepilot/github": ["../../packages/github/src/index.ts"]
     }
   },
   "include": ["src", "test"]
