@@ -28,13 +28,28 @@ Handled events: `ping`, `installation` (created, deleted, suspend, unsuspend), `
 | Method | Path | Auth | Description |
 | --- | --- | --- | --- |
 | GET | `/repositories` | session | `RepositorySummary[]` the user can access on GitHub |
+| GET | `/repositories/:id/issues` | session | Open `IssueSummary[]` imported via webhooks (newest first, max 100). `404` without access. |
 | PATCH | `/repositories/:id` | session, WRITE+ | Body `{ "enabled": boolean }` (strict). Returns `404` if the user has no access (existence is not revealed), `403` below WRITE, and `409` when enabling under an inactive installation. |
+
+## Tasks
+
+| Method | Path | Auth | Description |
+| --- | --- | --- | --- |
+| POST | `/tasks` | session, WRITE+ | Body `{ repositoryId, issueId?, description?, requirePlanApproval? }` (strict; an issue or a description of 10+ characters is required). Creates a `QUEUED` task and enqueues `{ taskId }`. `404` without access or for an issue from another repository, `403` below WRITE, `409` if the repository is not enabled, its installation is inactive, or the issue is closed, `503` if the queue is unavailable (the task is marked `FAILED`). Returns `TaskDetail` (`201`). |
+| GET | `/tasks?repositoryId=` | session | Newest 50 `TaskSummary[]` on repositories the user can access, optionally filtered |
+| GET | `/tasks/:id` | session | `TaskDetail`: status, pinned `baseSha`, the `analysis` context package once ANALYZING completes, and the event history. `404` without access. |
+| POST | `/tasks/:id/cancel` | session, WRITE+ | Compare-and-set to `CANCELLED` from any active status and drop a waiting job. `409` if the task already finished or changed concurrently. |
+
+A task the user cannot see is reported as `404`, exactly like a task that does not exist.
 
 ## Status codes
 
 | Code | Meaning |
 | --- | --- |
 | 400 | Invalid body, UUID, OAuth state, or missing webhook headers |
+| 403 | Authenticated, but below the GitHub permission the action needs |
+| 404 | Not found, or not visible to this user |
+| 409 | Conflicts with current state (repository disabled, installation inactive, task already finished) |
 | 401 | No/expired/revoked session, or bad webhook signature |
 | 502 | GitHub API call failed during login |
-| 503 | GitHub App not configured on this server (development only) |
+| 503 | GitHub App not configured on this server (development only), or the task queue is unavailable |
