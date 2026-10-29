@@ -23,6 +23,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
               CodePilot AI
             </Link>
             {me.ok && <Link href="/repositories">Repositories</Link>}
+            {me.ok && <Link href="/tasks">Tasks</Link>}
           </nav>
           {me.ok ? (
             <div className="user">
