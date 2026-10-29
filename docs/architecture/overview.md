@@ -30,7 +30,8 @@ CodePilot AI is a **modular monolith API** plus a **separate worker** for long-r
 | `apps/worker` | State machine execution, context retrieval, LLM calls, git operations | Execute repository code directly (delegates to sandbox) |
 | `services/sandbox-runner` | Running configured command profiles in a disposable container | Receive credentials, the DB URL, or arbitrary commands |
 | `packages/contracts` | Task statuses, transitions, plan schema, queue payloads | Depend on any runtime service |
-| `packages/agent-core` | Path, command, and repair policies; tool interfaces | Perform I/O beyond the workspace path checks |
+| `packages/agent-core` | Path, command, and repair policies; file filtering, project detection, symbol extraction, chunking, context budgeting | Perform I/O beyond the workspace path checks |
+| `packages/github` | GitHub App JWT, installation tokens, installation-scoped REST calls (shared by API and worker) | Persist or log tokens |
 
 ## Task execution model
 
@@ -40,4 +41,25 @@ CodePilot AI is a **modular monolith API** plus a **separate worker** for long-r
 - The pipeline stops at human gates (`AWAITING_PLAN_APPROVAL`, `READY_FOR_REVIEW`). An approval in the API re-enqueues the task.
 - External side effects (push, PR creation) are wrapped in `idempotency_keys` so a retry after a crash returns the original result instead of opening a second PR.
 
-See [state-machine.md](./state-machine.md) and [data-model.md](./data-model.md).
+## Repository analysis (ANALYZING)
+
+```
+GitHub: default branch → head SHA ──pin──▶ agent_tasks.base_sha (set once; reused on retry)
+snapshot for (repository, SHA) exists? ── yes ─────────────────────────────┐
+        │ no                                                                │
+        ▼                                                                   │
+shallow fetch of that one SHA into .workspaces/<task>-<rand>/repo           │
+(hardened git, token via env only) → walk without following symlinks        │
+→ filter (secrets never opened) → chunk + symbols → one transaction:        │
+repository_snapshots + repository_files + code_chunks + code_symbols        │
+→ workspace deleted (always, in finally)                                    │
+        ▼                                                                   ▼
+retrieve: paths named in the task · symbol names · full-text (tsvector) · AGENTS.md
+→ merge + rank + fit budget → agent_tasks.analysis (ContextPackage) → PLANNING
+```
+
+- Analysis never runs repository code. `git` runs with hooks, submodules, symlinks, and non-https protocols disabled and no user or system git config.
+- A snapshot is written in a single transaction, so a half-indexed commit is never visible, and two workers indexing the same commit collapse to one row.
+- Only TypeScript/JavaScript repositories proceed to planning in this release; others fail at analysis with the profile kept for inspection.
+
+See [state-machine.md](./state-machine.md), [data-model.md](./data-model.md), and [ADR 0004](../decisions/0004-repository-analysis-and-retrieval.md).

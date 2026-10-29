@@ -1,6 +1,6 @@
 # Data model
 
-Schema: `prisma/schema.prisma`. Initial migration: `prisma/migrations/20261027000000_init`.
+Schema: `prisma/schema.prisma`. Migrations: `prisma/migrations/` (`init`, `auth_and_repository_access`, `repository_analysis`).
 
 ```mermaid
 erDiagram
@@ -10,8 +10,10 @@ erDiagram
   repositories ||--o{ repository_access : "visible to"
   repositories ||--o| repository_settings : configures
   repositories ||--o{ issues : has
-  repositories ||--o{ repository_files : "indexed at commit"
+  repositories ||--o{ repository_snapshots : "indexed at commit"
+  repository_snapshots ||--o{ repository_files : contains
   repository_files ||--o{ code_chunks : split
+  repository_files ||--o{ code_symbols : declares
   repositories ||--o{ agent_tasks : targets
   users ||--o{ agent_tasks : requests
   issues |o--o{ agent_tasks : drives
@@ -33,6 +35,8 @@ erDiagram
 | `repositories.github_repo_id` unique | Repos are renamed and transferred; the numeric id is stable |
 | `repository_access (user_id, repository_id)` primary key | One permission per user per repository, rebuilt from GitHub at sign-in ([ADR 0003](../decisions/0003-github-derived-access-and-opaque-sessions.md)) |
 | `sessions.token_hash` unique | Lookup by hash; the raw token never touches the database |
+| `repository_snapshots (repository_id, commit_sha)` unique | A commit is indexed once; concurrent indexers collapse to one row |
+| `repository_files (snapshot_id, path)` unique | One row per path per indexed commit |
 | `issues (repository_id, github_issue_number)` unique | Webhook redelivery and re-import must upsert, not duplicate |
 | `agent_runs (task_id, attempt_number)` unique | One row per bounded attempt; retries can't collide |
 | `agent_tasks (repository_id, branch_name)` unique | Two tasks can never push to the same branch (NULLs allowed until a branch is assigned) |
@@ -46,4 +50,6 @@ erDiagram
 - `test_results.output_summary` is bounded and sanitized; full logs go to object storage via `log_object_key`.
 - No credential or token column exists anywhere. Session tokens are stored only as SHA-256 hashes; GitHub user tokens are never stored; installation tokens are minted on demand and held in memory only.
 - Repositories leaving an installation are soft-removed (`removed_at`) and disabled, so task history is preserved.
-- `repository_files` and `code_chunks` are **derived, versioned** data keyed by `commit_sha`, safe to drop and rebuild. Full-text (`tsvector`) and optional embedding columns arrive via raw SQL migration in week 3.
+- `repository_snapshots`, `repository_files`, `code_chunks`, and `code_symbols` are **derived, versioned** data keyed by commit, safe to drop and rebuild. A snapshot and all its rows are written in one transaction; only the newest `SNAPSHOTS_TO_KEEP` per repository are kept.
+- `code_chunks.search_vector` is a generated column, `to_tsvector('simple', search_text)`, with a GIN index. `search_text` holds normalized identifier terms (`getUserById` → `getuserbyid get user by id`), so code identifiers and plain-language task descriptions meet. Embeddings remain an optional later addition.
+- `agent_tasks.analysis` stores the `ContextPackage` (pinned SHA, project profile, ranked snippets with line ranges) handed to planning. It is validated against the shared schema on write and again on read.
