@@ -23,6 +23,15 @@ export interface RepositorySummary {
   installationStatus: "ACTIVE" | "SUSPENDED" | "DELETED";
 }
 
+/** An issue imported from GitHub webhooks. Its title and body are untrusted text. */
+export interface IssueSummary {
+  id: string;
+  number: number;
+  title: string;
+  state: "OPEN" | "CLOSED";
+  updatedAt: string;
+}
+
 export const UpdateRepositoryRequestSchema = z.object({ enabled: z.boolean() }).strict();
 export type UpdateRepositoryRequest = z.infer<typeof UpdateRepositoryRequestSchema>;
 
