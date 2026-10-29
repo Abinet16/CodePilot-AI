@@ -1,8 +1,10 @@
 import { readFileSync } from "node:fs";
 import { ServiceUnavailableException } from "@nestjs/common";
+import { GITHUB_API_BASE, GitHubApiError, GitHubAppClient, GitHubRepository, githubHeaders, nextLink } from "@codepilot/github";
 import type { GitHubAppSettings } from "../config";
-import { createAppJwt } from "./app-jwt";
-import { InstallationTokenCache } from "./installation-token-cache";
+
+export { GitHubApiError, nextLink };
+export type { GitHubRepository };
 
 export interface GitHubUser {
   id: number;
@@ -16,17 +18,6 @@ export interface GitHubInstallation {
   id: number;
   account: { login: string } | null;
   suspended_at: string | null;
-}
-
-export interface GitHubRepository {
-  id: number;
-  name: string;
-  owner: { login: string };
-  default_branch: string;
-  private: boolean;
-  archived: boolean;
-  /** The authenticated user's permissions; present on user-scoped listings. */
-  permissions?: { admin: boolean; maintain?: boolean; push: boolean; triage?: boolean; pull: boolean };
 }
 
 /** Everything the API needs from GitHub, so tests can substitute a fake. */
@@ -43,30 +34,16 @@ export interface GitHubApi {
 
 export const GITHUB_API = Symbol("GITHUB_API");
 
-export class GitHubApiError extends Error {
-  constructor(
-    readonly status: number,
-    readonly endpoint: string,
-  ) {
-    // Deliberately excludes response bodies and headers, which may echo credentials.
-    super(`GitHub API ${endpoint} responded ${status}`);
-    this.name = "GitHubApiError";
-  }
-}
-
-const API_BASE = "https://api.github.com";
 const MAX_PAGES = 50;
 
 export class GitHubHttpClient implements GitHubApi {
-  private readonly privateKey: string;
-  private readonly installationTokens: InstallationTokenCache;
+  private readonly app: GitHubAppClient;
 
   constructor(
     private readonly settings: GitHubAppSettings,
     private readonly fetchFn: typeof fetch = fetch,
   ) {
-    this.privateKey = readFileSync(settings.privateKeyPath, "utf8");
-    this.installationTokens = new InstallationTokenCache((id) => this.mintInstallationToken(id));
+    this.app = new GitHubAppClient(settings.appId, readFileSync(settings.privateKeyPath, "utf8"), fetchFn);
   }
 
   async exchangeOAuthCode(code: string, redirectUri: string): Promise<string> {
@@ -98,20 +75,11 @@ export class GitHubHttpClient implements GitHubApi {
   }
 
   getInstallationToken(installationId: bigint): Promise<string> {
-    return this.installationTokens.get(installationId);
-  }
-
-  private async mintInstallationToken(installationId: bigint) {
-    const jwt = createAppJwt(this.settings.appId, this.privateKey);
-    const endpoint = `/app/installations/${installationId}/access_tokens`;
-    const res = await this.fetchFn(`${API_BASE}${endpoint}`, { method: "POST", headers: this.headers(jwt) });
-    if (!res.ok) throw new GitHubApiError(res.status, `POST ${endpoint}`);
-    const body = (await res.json()) as { token: string; expires_at: string };
-    return { token: body.token, expiresAt: new Date(body.expires_at) };
+    return this.app.getInstallationToken(installationId);
   }
 
   private async request<T>(path: string, token: string): Promise<T> {
-    const res = await this.fetchFn(`${API_BASE}${path}`, { headers: this.headers(token) });
+    const res = await this.fetchFn(`${GITHUB_API_BASE}${path}`, { headers: githubHeaders(token) });
     if (!res.ok) throw new GitHubApiError(res.status, `GET ${path}`);
     return (await res.json()) as T;
   }
@@ -119,9 +87,9 @@ export class GitHubHttpClient implements GitHubApi {
   /** Follows Link: rel="next" headers for list endpoints that wrap results in an object. */
   private async paginate<T>(path: string, token: string, key: string): Promise<T[]> {
     const items: T[] = [];
-    let url: string | null = `${API_BASE}${path}?per_page=100`;
+    let url: string | null = `${GITHUB_API_BASE}${path}?per_page=100`;
     for (let page = 0; url && page < MAX_PAGES; page++) {
-      const res: Response = await this.fetchFn(url, { headers: this.headers(token) });
+      const res: Response = await this.fetchFn(url, { headers: githubHeaders(token) });
       if (!res.ok) throw new GitHubApiError(res.status, `GET ${path}`);
       const body = (await res.json()) as Record<string, T[]>;
       items.push(...(body[key] ?? []));
@@ -129,23 +97,6 @@ export class GitHubHttpClient implements GitHubApi {
     }
     return items;
   }
-
-  private headers(token: string): Record<string, string> {
-    return {
-      Accept: "application/vnd.github+json",
-      Authorization: `Bearer ${token}`,
-      "X-GitHub-Api-Version": "2022-11-28",
-      "User-Agent": "codepilot-ai",
-    };
-  }
-}
-
-export function nextLink(linkHeader: string | null): string | null {
-  if (!linkHeader) return null;
-  const match = linkHeader.split(",").find((part) => /rel="next"/.test(part));
-  const url = match?.match(/<([^>]+)>/)?.[1];
-  // Only follow links back to the GitHub API, never to an arbitrary host.
-  return url?.startsWith(`${API_BASE}/`) ? url : null;
 }
 
 /** Used when the GitHub App is not configured (local development without an app). */
