@@ -9,7 +9,8 @@ import path from "node:path";
 
 const DENIED_SEGMENTS = new Set([".git", "node_modules", ".next", "dist", "build", "coverage", ".workspaces"]);
 
-const DENIED_BASENAMES = [
+/** Files that commonly hold credentials. Never written by the agent, and never read during analysis. */
+export const SECRET_FILE_PATTERNS: readonly RegExp[] = [
   /^\.env(\..*)?$/i,
   /^\.npmrc$/i,
   /^\.yarnrc(\.yml)?$/i,
@@ -64,7 +65,7 @@ export function normalizeRelativePath(requested: string): string {
     throw new PathPolicyError(requested, "denied_segment");
   }
   const base = segments[segments.length - 1]!;
-  if (DENIED_BASENAMES.some((re) => re.test(base))) {
+  if (SECRET_FILE_PATTERNS.some((re) => re.test(base))) {
     throw new PathPolicyError(requested, "denied_file");
   }
   if (DENIED_PREFIXES.some((p) => normalized.startsWith(p))) {
