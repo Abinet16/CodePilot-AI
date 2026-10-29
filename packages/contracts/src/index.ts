@@ -3,3 +3,4 @@ export * from "./plan";
 export * from "./api";
 export * from "./queue";
 export * from "./repositories";
+export * from "./analysis";
