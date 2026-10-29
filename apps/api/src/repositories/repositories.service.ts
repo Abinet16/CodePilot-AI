@@ -1,5 +1,5 @@
 import { ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
-import { MIN_PERMISSION_TO_ENABLE, RepositorySummary, hasPermission } from "@codepilot/contracts";
+import { IssueSummary, MIN_PERMISSION_TO_ENABLE, RepositorySummary, hasPermission } from "@codepilot/contracts";
 import type { GithubInstallation, Repository, RepositoryAccess } from "@prisma/client";
 import { AuditService } from "../audit/audit.service";
 import { PrismaService } from "../prisma/prisma.service";
@@ -39,6 +39,20 @@ export class RepositoriesService {
       orderBy: [{ repository: { owner: "asc" } }, { repository: { name: "asc" } }],
     });
     return rows.map(toSummary);
+  }
+
+  async listOpenIssues(userId: string, repositoryId: string): Promise<IssueSummary[]> {
+    const access = await this.prisma.repositoryAccess.findUnique({
+      where: { userId_repositoryId: { userId, repositoryId } },
+      include: { repository: true },
+    });
+    if (!access || access.repository.removedAt) throw new NotFoundException("Repository not found");
+    const issues = await this.prisma.issue.findMany({
+      where: { repositoryId, state: "OPEN" },
+      orderBy: { updatedAt: "desc" },
+      take: 100,
+    });
+    return issues.map((i) => ({ id: i.id, number: i.githubIssueNumber, title: i.title, state: i.state, updatedAt: i.updatedAt.toISOString() }));
   }
 
   async setEnabled(userId: string, repositoryId: string, enabled: boolean): Promise<RepositorySummary> {
