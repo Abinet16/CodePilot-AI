@@ -144,12 +144,12 @@ model Repository {
   removedAt      DateTime? @map("removed_at")
   createdAt      DateTime  @default(now()) @map("created_at")
 
-  installation GithubInstallation  @relation(fields: [installationId], references: [id], onDelete: Cascade)
+  installation GithubInstallation   @relation(fields: [installationId], references: [id], onDelete: Cascade)
   access       RepositoryAccess[]
   settings     RepositorySettings?
   issues       Issue[]
   tasks        AgentTask[]
-  files        RepositoryFile[]
+  snapshots    RepositorySnapshot[]
 
   @@index([owner, name])
   @@index([installationId])
@@ -213,6 +213,8 @@ model AgentTask {
   baseSha             String?    @map("base_sha")
   branchName          String?    @map("branch_name")
   failureReason       String?    @map("failure_reason")
+  /// ContextPackage from @codepilot/contracts, written when ANALYZING completes.
+  analysis            Json?
   createdAt           DateTime   @default(now()) @map("created_at")
   startedAt           DateTime?  @map("started_at")
   completedAt         DateTime?  @map("completed_at")
@@ -267,35 +269,81 @@ model ImplementationPlan {
   @@map("implementation_plans")
 }
 
-model RepositoryFile {
+/// One fully indexed commit of a repository. Derived data: it is created in a
+/// single transaction, so a snapshot row exists only when its files are complete.
+model RepositorySnapshot {
   id           String   @id @default(uuid()) @db.Uuid
   repositoryId String   @map("repository_id") @db.Uuid
   commitSha    String   @map("commit_sha")
-  path         String
-  contentHash  String   @map("content_hash")
-  language     String?
+  /// ProjectProfile from @codepilot/contracts.
+  profile      Json
+  /// IndexStats from @codepilot/contracts.
+  stats        Json
+  /// Every regular file path seen (bounded), including files that were not indexed.
+  paths        String[]
   indexedAt    DateTime @default(now()) @map("indexed_at")
 
-  repository Repository  @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
-  chunks     CodeChunk[]
+  repository Repository       @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  files      RepositoryFile[]
+  symbols    CodeSymbol[]
 
-  @@unique([repositoryId, commitSha, path])
+  @@unique([repositoryId, commitSha])
+  @@index([repositoryId, indexedAt])
+  @@map("repository_snapshots")
+}
+
+model RepositoryFile {
+  id          String @id @db.Uuid
+  snapshotId  String @map("snapshot_id") @db.Uuid
+  path        String
+  contentHash String @map("content_hash")
+  language    String
+  sizeBytes   Int    @map("size_bytes")
+
+  snapshot RepositorySnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+  chunks   CodeChunk[]
+  symbols  CodeSymbol[]
+
+  @@unique([snapshotId, path])
   @@map("repository_files")
 }
 
 model CodeChunk {
-  id               String @id @default(uuid()) @db.Uuid
-  repositoryFileId String @map("repository_file_id") @db.Uuid
-  chunkIndex       Int    @map("chunk_index")
-  startLine        Int    @map("start_line")
-  endLine          Int    @map("end_line")
+  id               String                   @id @default(uuid()) @db.Uuid
+  repositoryFileId String                   @map("repository_file_id") @db.Uuid
+  chunkIndex       Int                      @map("chunk_index")
+  startLine        Int                      @map("start_line")
+  endLine          Int                      @map("end_line")
   content          String
-  // Full-text search vector and optional embedding are added via raw SQL migration.
+  /// Normalized identifier terms (see agent-core searchTextFor); source of search_vector.
+  searchText       String                   @map("search_text")
+  /// Generated column: to_tsvector('simple', search_text). Never written by the application.
+  searchVector     Unsupported("tsvector")? @default(dbgenerated("to_tsvector('simple'::regconfig, search_text)")) @map("search_vector")
 
   file RepositoryFile @relation(fields: [repositoryFileId], references: [id], onDelete: Cascade)
 
   @@unique([repositoryFileId, chunkIndex])
+  @@index([searchVector], type: Gin)
   @@map("code_chunks")
+}
+
+/// Declarations found in indexed files. name_lower supports case-insensitive lookup.
+model CodeSymbol {
+  id               String  @id @default(uuid()) @db.Uuid
+  snapshotId       String  @map("snapshot_id") @db.Uuid
+  repositoryFileId String  @map("repository_file_id") @db.Uuid
+  name             String
+  nameLower        String  @map("name_lower")
+  kind             String
+  line             Int
+  exported         Boolean
+
+  snapshot RepositorySnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+  file     RepositoryFile     @relation(fields: [repositoryFileId], references: [id], onDelete: Cascade)
+
+  @@index([snapshotId, nameLower])
+  @@index([repositoryFileId])
+  @@map("code_symbols")
 }
 
 model Patch {
