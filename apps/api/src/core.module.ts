@@ -4,7 +4,7 @@ import { SessionGuard } from "./auth/session.guard";
 import { SessionService } from "./auth/session.service";
 import { API_CONFIG, loadConfig } from "./config";
 import { PrismaService } from "./prisma/prisma.service";
-import { redisProvider } from "./redis/redis.provider";
+import { RedisShutdown, redisProvider } from "./redis/redis.provider";
 
 /** Infrastructure shared by every feature module. */
 @Global()
@@ -13,6 +13,7 @@ import { redisProvider } from "./redis/redis.provider";
     { provide: API_CONFIG, useFactory: () => loadConfig() },
     PrismaService,
     redisProvider,
+    RedisShutdown,
     AuditService,
     SessionService,
     SessionGuard,
