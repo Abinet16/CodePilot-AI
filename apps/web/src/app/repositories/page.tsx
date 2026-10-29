@@ -1,4 +1,6 @@
 import type { RepositorySummary } from "@codepilot/contracts";
+import { MIN_PERMISSION_TO_ENABLE, hasPermission } from "@codepilot/contracts";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { apiGet } from "@/lib/api";
 import { RepositoryToggle } from "./repository-toggle";
@@ -50,6 +52,11 @@ export default async function RepositoriesPage() {
                 <td>{repo.permission.toLowerCase()}</td>
                 <td>
                   <RepositoryToggle repository={repo} />
+                  {repo.enabled && repo.installationStatus === "ACTIVE" && hasPermission(repo.permission, MIN_PERMISSION_TO_ENABLE) && (
+                    <Link className="small task-link" href={`/tasks/new?repositoryId=${repo.id}`}>
+                      New task
+                    </Link>
+                  )}
                 </td>
               </tr>
             ))}
