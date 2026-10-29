@@ -188,3 +188,100 @@ h2 {
     display: none;
   }
 }
+
+.status {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.status.active {
+  border-color: var(--fg);
+}
+
+.status.ok {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+
+.status.bad {
+  color: var(--bad);
+  border-color: var(--bad);
+}
+
+.status.muted {
+  color: var(--muted);
+}
+
+.task-link {
+  margin-left: 12px;
+}
+
+.form {
+  display: grid;
+  gap: 16px;
+}
+
+.form label {
+  display: grid;
+  gap: 6px;
+  font-size: 14px;
+}
+
+.form select,
+.form textarea {
+  font: inherit;
+  font-size: 14px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  width: 100%;
+}
+
+.prewrap {
+  white-space: pre-wrap;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 16px;
+  margin: 0;
+  font-size: 14px;
+}
+
+.facts dt {
+  color: var(--muted);
+}
+
+.facts dd {
+  margin: 0;
+}
+
+.snippet {
+  border-top: 1px solid var(--border);
+  padding: 8px 0;
+}
+
+.snippet summary {
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.snippet pre {
+  overflow-x: auto;
+  font-size: 12px;
+  padding: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.events {
+  margin: 0;
+  padding-left: 20px;
+}
