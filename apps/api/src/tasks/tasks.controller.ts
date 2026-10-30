@@ -1,5 +1,14 @@
 import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Query, UseGuards } from "@nestjs/common";
-import { CreateTaskRequest, CreateTaskRequestSchema, TaskDetail, TaskSummary } from "@codepilot/contracts";
+import {
+  ApprovePlanRequest,
+  ApprovePlanRequestSchema,
+  CreateTaskRequest,
+  CreateTaskRequestSchema,
+  RequestPlanChangesRequest,
+  RequestPlanChangesRequestSchema,
+  TaskDetail,
+  TaskSummary,
+} from "@codepilot/contracts";
 import { AuthUser, CurrentUser, SessionGuard } from "../auth/session.guard";
 import { ZodBodyPipe } from "../common/zod-body.pipe";
 import { TasksService } from "./tasks.service";
@@ -31,5 +40,25 @@ export class TasksController {
   @HttpCode(200)
   cancel(@CurrentUser() user: AuthUser, @Param("id", new ParseUUIDPipe()) id: string): Promise<TaskDetail> {
     return this.tasks.cancel(user.id, id);
+  }
+
+  @Post(":id/plan/approve")
+  @HttpCode(200)
+  approvePlan(
+    @CurrentUser() user: AuthUser,
+    @Param("id", new ParseUUIDPipe()) id: string,
+    @Body(new ZodBodyPipe(ApprovePlanRequestSchema)) body: ApprovePlanRequest,
+  ): Promise<TaskDetail> {
+    return this.tasks.approvePlan(user.id, id, body.version);
+  }
+
+  @Post(":id/plan/request-changes")
+  @HttpCode(200)
+  requestPlanChanges(
+    @CurrentUser() user: AuthUser,
+    @Param("id", new ParseUUIDPipe()) id: string,
+    @Body(new ZodBodyPipe(RequestPlanChangesRequestSchema)) body: RequestPlanChangesRequest,
+  ): Promise<TaskDetail> {
+    return this.tasks.requestPlanChanges(user.id, id, body.version, body.feedback);
   }
 }
