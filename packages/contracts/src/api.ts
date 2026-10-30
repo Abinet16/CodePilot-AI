@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ContextPackage } from "./analysis";
+import type { PlanSummary } from "./plan";
 import type { TaskStatus } from "./task-status";
 
 export const CreateTaskRequestSchema = z
@@ -42,12 +43,36 @@ export interface TaskEventSummary {
   createdAt: string;
 }
 
+/** One bounded model call made for a task, e.g. a planning attempt. */
+export interface AgentRunSummary {
+  attemptNumber: number;
+  stage: TaskStatus;
+  model: string;
+  status: "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
+  inputTokens: number;
+  outputTokens: number;
+  error: string | null;
+  startedAt: string;
+  completedAt: string | null;
+}
+
+export interface UsageTotals {
+  inputTokens: number;
+  outputTokens: number;
+  /** US dollars, from the list price of each model actually used. */
+  estimatedCostUsd: number;
+}
+
 export interface TaskDetail extends TaskSummary {
   description: string | null;
   issue: { number: number; title: string; state: "OPEN" | "CLOSED" } | null;
   requirePlanApproval: boolean;
   /** Present once ANALYZING has completed. */
   analysis: ContextPackage | null;
+  /** Oldest first; the last one is the current plan. */
+  plans: PlanSummary[];
+  runs: AgentRunSummary[];
+  usage: UsageTotals;
   events: TaskEventSummary[];
 }
 
