@@ -11,6 +11,7 @@
     "test:integration": "jest -c jest.integration.config.js --runInBand"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "0.135.0",
     "@codepilot/agent-core": "workspace:*",
     "@codepilot/contracts": "workspace:*",
     "@codepilot/github": "workspace:*",
