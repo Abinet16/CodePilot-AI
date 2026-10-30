@@ -1,6 +1,6 @@
 import { Inject, Injectable, OnModuleDestroy } from "@nestjs/common";
-import { JOBS, QUEUES } from "@codepilot/contracts";
-import type { RunTaskJob } from "@codepilot/contracts";
+import { JOBS, QUEUES, taskJobId } from "@codepilot/contracts";
+import type { RunTaskJob, TaskJobKey } from "@codepilot/contracts";
 import { Queue } from "bullmq";
 import Redis from "ioredis";
 import { REDIS } from "../redis/redis.provider";
@@ -14,24 +14,33 @@ export class TaskQueue implements OnModuleDestroy {
     this.queue = new Queue<RunTaskJob>(QUEUES.AGENT_TASKS, { connection: redis });
   }
 
-  async enqueue(taskId: string): Promise<void> {
-    // jobId = taskId: enqueueing the same task twice is a no-op in BullMQ.
+  /**
+   * The job id is derived from the task and the reason it is enqueued, so
+   * repeating the same request is a no-op in BullMQ while each human resume
+   * (approval, requested changes) still gets a fresh job.
+   */
+  async enqueue(taskId: string, key: TaskJobKey = "start"): Promise<void> {
     await this.queue.add(
       JOBS.RUN_TASK,
       { taskId },
       {
-        jobId: taskId,
+        jobId: taskJobId(taskId, key),
+        // Transient failures (rate limits, provider outages) are retried; stages resume from the persisted status.
         attempts: 3,
-        backoff: { type: "exponential", delay: 5_000 },
+        backoff: { type: "exponential", delay: 15_000 },
         removeOnComplete: 1_000,
         removeOnFail: 5_000,
       },
     );
   }
 
-  /** Drops a job that has not started yet. A running job notices cancellation at its next transition. */
-  async remove(taskId: string): Promise<void> {
-    await this.queue.remove(taskId);
+  /**
+   * Drops jobs that have not started yet. A running job is stopped by the
+   * worker, which polls for cancellation; a job that starts later finds the
+   * task terminal and exits.
+   */
+  async remove(taskId: string, keys: TaskJobKey[]): Promise<void> {
+    await Promise.all(keys.map((key) => this.queue.remove(taskJobId(taskId, key))));
   }
 
   async onModuleDestroy(): Promise<void> {
