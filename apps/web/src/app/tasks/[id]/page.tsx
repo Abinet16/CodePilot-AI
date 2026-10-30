@@ -1,10 +1,12 @@
 import type { TaskDetail } from "@codepilot/contracts";
-import { isTerminal } from "@codepilot/contracts";
+import { MAX_PLAN_VERSIONS, isTerminal } from "@codepilot/contracts";
 import { notFound, redirect } from "next/navigation";
 import { apiGet } from "@/lib/api";
 import { StatusBadge } from "../status-badge";
 import { AutoRefresh } from "./auto-refresh";
 import { CancelButton } from "./cancel-button";
+import { PlanReview } from "./plan-review";
+import { PlanView } from "./plan-view";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +27,9 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
   const task = result.data;
   const analysis = task.analysis;
   const active = !isTerminal(task.status) && task.status !== "AWAITING_PLAN_APPROVAL" && task.status !== "READY_FOR_REVIEW";
+  const currentPlan = task.plans.at(-1);
+  const earlierPlans = task.plans.slice(0, -1).reverse();
+  const awaitingReview = task.status === "AWAITING_PLAN_APPROVAL" && currentPlan?.status === "PROPOSED";
 
   return (
     <>
@@ -52,6 +57,64 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
           <p className="muted">Not pinned yet.</p>
         )}
       </section>
+
+      {currentPlan && (
+        <section className="card">
+          <h2>Implementation plan</h2>
+          <PlanView summary={currentPlan} />
+          {awaitingReview && (
+            <PlanReview taskId={task.id} version={currentPlan.version} canRevise={currentPlan.version < MAX_PLAN_VERSIONS} />
+          )}
+          {earlierPlans.map((p) => (
+            <details key={p.version} className="snippet">
+              <summary>Version {p.version}</summary>
+              <PlanView summary={p} />
+            </details>
+          ))}
+        </section>
+      )}
+      {!currentPlan && task.status === "PLANNING" && (
+        <section className="card">
+          <h2>Implementation plan</h2>
+          <p className="muted">The agent is writing a plan…</p>
+        </section>
+      )}
+
+      {task.runs.length > 0 && (
+        <section className="card">
+          <h2>Model usage</h2>
+          <p className="muted small">
+            {task.usage.inputTokens.toLocaleString()} input · {task.usage.outputTokens.toLocaleString()} output tokens · about $
+            {task.usage.estimatedCostUsd.toFixed(4)}
+          </p>
+          <table className="table small">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Stage</th>
+                <th>Model</th>
+                <th>Status</th>
+                <th>Tokens in / out</th>
+              </tr>
+            </thead>
+            <tbody>
+              {task.runs.map((r) => (
+                <tr key={r.attemptNumber}>
+                  <td>{r.attemptNumber}</td>
+                  <td>{r.stage}</td>
+                  <td>{r.model}</td>
+                  <td className={r.status === "FAILED" ? "bad" : undefined} title={r.error ?? undefined}>
+                    {r.status.toLowerCase()}
+                  </td>
+                  <td>
+                    {r.inputTokens.toLocaleString()} / {r.outputTokens.toLocaleString()}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
 
       {analysis && (
         <>
