@@ -1,7 +1,25 @@
 import { ConflictException, ForbiddenException, Injectable, Logger, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
-import type { ContextPackage, CreateTaskRequest, RepositoryPermission, TaskDetail, TaskSummary } from "@codepilot/contracts";
-import { ContextPackageSchema, MIN_PERMISSION_TO_ENABLE, TaskStatus, hasPermission, isTerminal } from "@codepilot/contracts";
-import type { AgentTask, Issue, Prisma, Repository, TaskEvent } from "@prisma/client";
+import type {
+  AgentRunSummary,
+  ContextPackage,
+  CreateTaskRequest,
+  ImplementationPlan,
+  RepositoryPermission,
+  TaskDetail,
+  TaskJobKey,
+  TaskSummary,
+  UsageTotals,
+} from "@codepilot/contracts";
+import {
+  ContextPackageSchema,
+  ImplementationPlanSchema,
+  MAX_PLAN_VERSIONS,
+  MIN_PERMISSION_TO_ENABLE,
+  TaskStatus,
+  hasPermission,
+  isTerminal,
+} from "@codepilot/contracts";
+import type { AgentRun, AgentTask, ImplementationPlan as PlanRow, Issue, Prisma, Repository, TaskEvent } from "@prisma/client";
 import { AuditService } from "../audit/audit.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { TaskQueue } from "./task-queue";
@@ -30,7 +48,32 @@ function toSummary(task: TaskRow): TaskSummary {
   };
 }
 
-function toDetail(task: TaskRow & { events: TaskEvent[] }): TaskDetail {
+type DetailRow = TaskRow & {
+  events: TaskEvent[];
+  runs: AgentRun[];
+  plans: Array<PlanRow & { reviewedBy: { githubLogin: string } | null }>;
+};
+
+function runTokens(run: AgentRun): { inputTokens: number; outputTokens: number } {
+  const u = (run.tokenUsage ?? {}) as Record<string, unknown>;
+  const n = (key: string) => (typeof u[key] === "number" ? (u[key] as number) : 0);
+  return { inputTokens: n("inputTokens") + n("cacheCreationInputTokens") + n("cacheReadInputTokens"), outputTokens: n("outputTokens") };
+}
+
+function toRunSummary(run: AgentRun): AgentRunSummary {
+  return {
+    attemptNumber: run.attemptNumber,
+    stage: run.stage,
+    model: run.model,
+    status: run.status,
+    ...runTokens(run),
+    error: run.error,
+    startedAt: run.startedAt.toISOString(),
+    completedAt: run.completedAt?.toISOString() ?? null,
+  };
+}
+
+function toDetail(task: DetailRow, usage: UsageTotals): TaskDetail {
   // Stored analysis is re-validated on the way out; anything malformed is withheld, not passed through.
   const analysis = task.analysis ? ContextPackageSchema.safeParse(task.analysis) : null;
   return {
@@ -39,6 +82,21 @@ function toDetail(task: TaskRow & { events: TaskEvent[] }): TaskDetail {
     issue: task.issue ? { number: task.issue.githubIssueNumber, title: task.issue.title, state: task.issue.state } : null,
     requirePlanApproval: task.requirePlanApproval,
     analysis: analysis?.success ? (analysis.data as ContextPackage) : null,
+    plans: task.plans.map((p) => {
+      const plan = ImplementationPlanSchema.safeParse(p.planJson);
+      return {
+        version: p.version,
+        status: p.status,
+        plan: plan.success ? (plan.data as ImplementationPlan) : null,
+        model: p.model,
+        feedback: p.feedback,
+        reviewedBy: p.reviewedBy?.githubLogin ?? null,
+        reviewedAt: p.reviewedAt?.toISOString() ?? null,
+        createdAt: p.createdAt.toISOString(),
+      };
+    }),
+    runs: task.runs.map(toRunSummary),
+    usage,
     events: task.events.map((e) => ({
       id: e.id,
       eventType: e.eventType,
@@ -54,6 +112,8 @@ const detailInclude = {
   repository: true,
   issue: true,
   events: { orderBy: { createdAt: "asc" } },
+  runs: { orderBy: { attemptNumber: "asc" } },
+  plans: { orderBy: { version: "asc" }, include: { reviewedBy: { select: { githubLogin: true } } } },
 } satisfies Prisma.AgentTaskInclude;
 
 /**
@@ -105,7 +165,7 @@ export class TasksService {
       await this.queue.enqueue(task.id);
     } catch (err) {
       this.logger.error(`Could not enqueue task ${task.id}: ${err instanceof Error ? err.message : String(err)}`);
-      await this.failUnqueued(task.id);
+      await this.failUnqueued(task.id, TaskStatus.QUEUED);
       throw new ServiceUnavailableException("The task queue is unavailable; please try again");
     }
     return this.get(userId, task.id);
@@ -127,14 +187,19 @@ export class TasksService {
       include: detailInclude,
     });
     if (!task) throw new NotFoundException("Task not found");
-    return toDetail(task);
+    const sum = await this.prisma.usageRecord.aggregate({
+      where: { taskId },
+      _sum: { inputTokens: true, outputTokens: true, estimatedCost: true },
+    });
+    return toDetail(task, {
+      inputTokens: sum._sum.inputTokens ?? 0,
+      outputTokens: sum._sum.outputTokens ?? 0,
+      estimatedCostUsd: Number(sum._sum.estimatedCost ?? 0),
+    });
   }
 
   async cancel(userId: string, taskId: string): Promise<TaskDetail> {
-    const task = await this.prisma.agentTask.findUnique({ where: { id: taskId } });
-    const access = task ? await this.access(userId, task.repositoryId) : null;
-    if (!task || !access) throw new NotFoundException("Task not found");
-    this.requireWrite(access.permission);
+    const task = await this.writableTask(userId, taskId);
     if (isTerminal(task.status)) throw new ConflictException(`Task is already ${task.status}`);
 
     await this.prisma.$transaction(async (tx) => {
@@ -150,8 +215,80 @@ export class TasksService {
       await this.audit.record({ userId, taskId, action: "task.cancelled", metadata: { fromStatus: task.status } }, tx);
     });
 
-    await this.queue.remove(taskId).catch(() => undefined);
+    const latest = await this.prisma.implementationPlan.findFirst({ where: { taskId }, orderBy: { version: "desc" } });
+    const keys: TaskJobKey[] = ["start", ...(latest ? ([`plan-v${latest.version}-approved`, `plan-v${latest.version}-revise`] as const) : [])];
+    await this.queue.remove(taskId, keys).catch(() => undefined);
     return this.get(userId, taskId);
+  }
+
+  /** Approves the plan awaiting review and resumes the task at GENERATING_PATCH. */
+  async approvePlan(userId: string, taskId: string, version: number): Promise<TaskDetail> {
+    const task = await this.writableTask(userId, taskId);
+    this.requireAwaitingReview(task.status);
+    const now = new Date();
+
+    await this.prisma.$transaction(async (tx) => {
+      await this.claimPlan(tx, taskId, version, { status: "APPROVED", reviewedById: userId, reviewedAt: now, approvedAt: now });
+      await this.resume(tx, taskId, TaskStatus.GENERATING_PATCH, { reason: "plan_approved", version });
+      await this.audit.record({ userId, taskId, action: "plan.approved", metadata: { version } }, tx);
+    });
+    await this.enqueueOrFail(taskId, `plan-v${version}-approved`, TaskStatus.GENERATING_PATCH);
+    return this.get(userId, taskId);
+  }
+
+  /** Sends the plan back to PLANNING with the reviewer's feedback; the worker writes the next version. */
+  async requestPlanChanges(userId: string, taskId: string, version: number, feedback: string): Promise<TaskDetail> {
+    const task = await this.writableTask(userId, taskId);
+    this.requireAwaitingReview(task.status);
+    if (version >= MAX_PLAN_VERSIONS) {
+      throw new ConflictException(`Plan version ${version} is the last revision allowed; approve it or cancel the task`);
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await this.claimPlan(tx, taskId, version, { status: "CHANGES_REQUESTED", feedback, reviewedById: userId, reviewedAt: new Date() });
+      await this.resume(tx, taskId, TaskStatus.PLANNING, { reason: "plan_changes_requested", version });
+      await this.audit.record({ userId, taskId, action: "plan.changes_requested", metadata: { version } }, tx);
+    });
+    await this.enqueueOrFail(taskId, `plan-v${version}-revise`, TaskStatus.PLANNING);
+    return this.get(userId, taskId);
+  }
+
+  private async writableTask(userId: string, taskId: string): Promise<AgentTask> {
+    const task = await this.prisma.agentTask.findUnique({ where: { id: taskId } });
+    const access = task ? await this.access(userId, task.repositoryId) : null;
+    if (!task || !access) throw new NotFoundException("Task not found");
+    this.requireWrite(access.permission);
+    return task;
+  }
+
+  private requireAwaitingReview(status: TaskStatus): void {
+    if (status !== TaskStatus.AWAITING_PLAN_APPROVAL) throw new ConflictException(`Task is ${status}, not awaiting plan approval`);
+  }
+
+  /**
+   * Compare-and-set on the plan: only the version currently awaiting review
+   * can be reviewed, and only once, even with two reviewers racing.
+   */
+  private async claimPlan(tx: Prisma.TransactionClient, taskId: string, version: number, data: Prisma.ImplementationPlanUncheckedUpdateManyInput) {
+    const { count } = await tx.implementationPlan.updateMany({ where: { taskId, version, status: "PROPOSED" }, data });
+    if (count !== 1) throw new ConflictException(`Plan version ${version} is not the plan awaiting review; reload and try again`);
+  }
+
+  private async resume(tx: Prisma.TransactionClient, taskId: string, to: TaskStatus, payload: Prisma.InputJsonObject) {
+    const from = TaskStatus.AWAITING_PLAN_APPROVAL;
+    const { count } = await tx.agentTask.updateMany({ where: { id: taskId, status: from }, data: { status: to } });
+    if (count !== 1) throw new ConflictException("Task status changed; reload and try again");
+    await tx.taskEvent.create({ data: { taskId, eventType: "status_changed", fromStatus: from, toStatus: to, payload } });
+  }
+
+  private async enqueueOrFail(taskId: string, key: TaskJobKey, status: TaskStatus): Promise<void> {
+    try {
+      await this.queue.enqueue(taskId, key);
+    } catch (err) {
+      this.logger.error(`Could not enqueue task ${taskId}: ${err instanceof Error ? err.message : String(err)}`);
+      await this.failUnqueued(taskId, status);
+      throw new ServiceUnavailableException("The task queue is unavailable; please try again");
+    }
   }
 
   private access(userId: string, repositoryId: string) {
@@ -169,16 +306,16 @@ export class TasksService {
     }
   }
 
-  private async failUnqueued(taskId: string): Promise<void> {
+  private async failUnqueued(taskId: string, from: TaskStatus): Promise<void> {
     const reason = "Could not enqueue the task";
-    await this.prisma.$transaction([
-      this.prisma.agentTask.updateMany({
-        where: { id: taskId, status: TaskStatus.QUEUED },
+    await this.prisma.$transaction(async (tx) => {
+      const { count } = await tx.agentTask.updateMany({
+        where: { id: taskId, status: from },
         data: { status: TaskStatus.FAILED, failureReason: reason, completedAt: new Date() },
-      }),
-      this.prisma.taskEvent.create({
-        data: { taskId, eventType: "status_changed", fromStatus: TaskStatus.QUEUED, toStatus: TaskStatus.FAILED, payload: { reason } },
-      }),
-    ]);
+      });
+      if (count === 1) {
+        await tx.taskEvent.create({ data: { taskId, eventType: "status_changed", fromStatus: from, toStatus: TaskStatus.FAILED, payload: { reason } } });
+      }
+    });
   }
 }
