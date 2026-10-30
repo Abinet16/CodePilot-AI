@@ -9,8 +9,12 @@ import { createAnalyzeStage } from "./analysis/analyze-stage";
 import { ContextRetriever } from "./analysis/retriever";
 import { SnapshotStore } from "./analysis/snapshot-store";
 import { WorkspaceManager } from "./analysis/workspace";
+import { watchForCancellation } from "./cancellation";
 import { loadConfig } from "./config";
 import { runPipeline } from "./pipeline";
+import { AnthropicPlanModel } from "./planning/anthropic-plan-model";
+import { createPlanStage } from "./planning/plan-stage";
+import { RunRecorder } from "./runs";
 import { StaleTransitionError, TaskStateStore } from "./task-state";
 
 async function main(): Promise<void> {
@@ -26,6 +30,11 @@ async function main(): Promise<void> {
       : null;
   if (!github) console.warn("[worker] GitHub App is not configured; repository analysis will fail");
 
+  const planModel = config.ANTHROPIC_API_KEY
+    ? AnthropicPlanModel.fromApiKey(config.ANTHROPIC_API_KEY, config.PLANNING_MODEL, config.PLANNING_EFFORT, config.MODEL_TIMEOUT_SECONDS * 1000)
+    : null;
+  if (!planModel) console.warn("[worker] ANTHROPIC_API_KEY is not set; planning will fail");
+
   const analyze = createAnalyzeStage({
     prisma,
     github,
@@ -36,28 +45,51 @@ async function main(): Promise<void> {
     gitTimeoutMs: config.GIT_TIMEOUT_SECONDS * 1000,
     snapshotsToKeep: config.SNAPSHOTS_TO_KEEP,
   });
+  const plan = createPlanStage({
+    prisma,
+    model: planModel,
+    runs: new RunRecorder(prisma),
+    maxAttempts: config.PLANNING_MAX_ATTEMPTS,
+    taskTokenBudget: config.TASK_TOKEN_BUDGET,
+    maxOutputTokens: config.PLANNING_MAX_OUTPUT_TOKENS,
+  });
 
   // A workspace older than any analysis could take was left by a crashed worker.
-  const swept = await workspaces.sweep(4 * config.GIT_TIMEOUT_SECONDS * 1000);
+  const swept = await workspaces.sweep(2 * config.ANALYZE_TIMEOUT_SECONDS * 1000);
   if (swept > 0) console.log(`[worker] removed ${swept} stale workspace(s)`);
+
+  const loadStatus = async (id: string) => (await prisma.agentTask.findUniqueOrThrow({ where: { id } })).status;
 
   const worker = new Worker<RunTaskJob>(
     QUEUES.AGENT_TASKS,
     async (job) => {
       if (job.name !== JOBS.RUN_TASK) throw new Error(`Unknown job ${job.name}`);
+      const { taskId } = job.data;
       const controller = new AbortController();
+      const stopWatching = watchForCancellation(taskId, loadStatus, controller, config.CANCELLATION_POLL_MS);
       try {
         const final = await runPipeline(
-          job.data.taskId,
+          taskId,
           {
             stages: {
-              // Week 4+: PLANNING, GENERATING_PATCH, RUNNING_CHECKS, REPAIRING, OPENING_PR
+              // Week 5+: GENERATING_PATCH, RUNNING_CHECKS, REPAIRING, OPENING_PR
               [TaskStatus.QUEUED]: async () => TaskStatus.ANALYZING,
               [TaskStatus.ANALYZING]: analyze,
+              [TaskStatus.PLANNING]: plan,
             },
-            loadStatus: async (id) => (await prisma.agentTask.findUniqueOrThrow({ where: { id } })).status,
+            stageTimeoutsMs: {
+              [TaskStatus.ANALYZING]: config.ANALYZE_TIMEOUT_SECONDS * 1000,
+              [TaskStatus.PLANNING]: config.PLAN_TIMEOUT_SECONDS * 1000,
+            },
+            loadStatus,
             transition: (id, from, to) => store.transition(id, from, to),
             fail: (id, from, reason) => store.fail(id, from, reason),
+            canRetry: job.attemptsMade + 1 < (job.opts.attempts ?? 1),
+            onRetry: async (id, status, reason) => {
+              await prisma.taskEvent.create({
+                data: { taskId: id, eventType: "stage_retry_scheduled", payload: { status, reason, attempt: job.attemptsMade + 1 } },
+              });
+            },
           },
           controller.signal,
         );
@@ -66,9 +98,17 @@ async function main(): Promise<void> {
         // Someone else (a cancel request or another worker) moved the task. Not a job failure.
         if (err instanceof StaleTransitionError) return { status: "superseded" };
         throw err;
+      } finally {
+        stopWatching();
       }
     },
-    { connection, concurrency: config.WORKER_CONCURRENCY },
+    {
+      connection,
+      concurrency: config.WORKER_CONCURRENCY,
+      // A job whose worker died is handed to another worker once its lock lapses; the pipeline resumes it.
+      lockDuration: 60_000,
+      maxStalledCount: 2,
+    },
   );
 
   worker.on("failed", (job, err) => console.error(`[worker] job ${job?.id} failed: ${err.message}`));
