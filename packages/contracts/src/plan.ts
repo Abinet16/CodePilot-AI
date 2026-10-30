@@ -5,6 +5,9 @@ import { z } from "zod";
  * Paths here are untrusted model output; agent-core's path policy validates
  * them against the workspace before anything is written.
  */
+export const PLAN_FILE_CHANGES = ["modify", "create", "delete"] as const;
+export type PlanFileChange = (typeof PLAN_FILE_CHANGES)[number];
+
 export const ImplementationPlanSchema = z.object({
   summary: z.string().min(1).max(2_000),
   assumptions: z.array(z.string().max(500)).max(20),
@@ -12,6 +15,8 @@ export const ImplementationPlanSchema = z.object({
     .array(
       z.object({
         path: z.string().min(1).max(500),
+        /** Whether the file exists at the pinned commit decides which of these is valid. */
+        change: z.enum(PLAN_FILE_CHANGES),
         reason: z.string().min(1).max(500),
       }),
     )
@@ -31,3 +36,34 @@ export const PlanningOutcomeSchema = z.discriminatedUnion("kind", [
 ]);
 
 export type PlanningOutcome = z.infer<typeof PlanningOutcomeSchema>;
+
+/** Mirrors PlanStatus in the Prisma schema. */
+export const PLAN_STATUSES = ["PROPOSED", "APPROVED", "CHANGES_REQUESTED"] as const;
+export type PlanStatus = (typeof PLAN_STATUSES)[number];
+
+/** Each revision costs a model call; a task gets at most this many plan versions. */
+export const MAX_PLAN_VERSIONS = 3;
+
+/** Reviews name the version they saw, so a reviewer never approves a plan they have not read. */
+export const ApprovePlanRequestSchema = z.object({ version: z.number().int().positive() }).strict();
+export type ApprovePlanRequest = z.infer<typeof ApprovePlanRequestSchema>;
+
+export const RequestPlanChangesRequestSchema = z
+  .object({
+    version: z.number().int().positive(),
+    feedback: z.string().trim().min(10).max(4_000),
+  })
+  .strict();
+export type RequestPlanChangesRequest = z.infer<typeof RequestPlanChangesRequestSchema>;
+
+export interface PlanSummary {
+  version: number;
+  status: PlanStatus;
+  /** Null when the stored plan no longer passes validation; it is withheld rather than shown. */
+  plan: ImplementationPlan | null;
+  model: string;
+  feedback: string | null;
+  reviewedBy: string | null;
+  reviewedAt: string | null;
+  createdAt: string;
+}
