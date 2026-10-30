@@ -43,6 +43,13 @@ enum RunStatus {
   CANCELLED
 }
 
+/// Mirrors PLAN_STATUSES in @codepilot/contracts.
+enum PlanStatus {
+  PROPOSED
+  APPROVED
+  CHANGES_REQUESTED
+}
+
 enum PatchStatus {
   PROPOSED
   VERIFIED
@@ -96,6 +103,7 @@ model User {
   tasks            AgentTask[]
   auditLogs        AuditLog[]
   usageRecords     UsageRecord[]
+  reviewedPlans    ImplementationPlan[]
 
   @@map("users")
 }
@@ -237,33 +245,51 @@ model AgentTask {
   @@map("agent_tasks")
 }
 
+/// One bounded model call for a task. Attempt numbers count across all stages.
 model AgentRun {
-  id            String    @id @default(uuid()) @db.Uuid
-  taskId        String    @map("task_id") @db.Uuid
-  attemptNumber Int       @map("attempt_number")
+  id            String     @id @default(uuid()) @db.Uuid
+  taskId        String     @map("task_id") @db.Uuid
+  attemptNumber Int        @map("attempt_number")
+  /// The stage that made the call, e.g. PLANNING.
+  stage         TaskStatus
+  /// The model requested; usage records name the model that actually answered.
   model         String
-  status        RunStatus @default(RUNNING)
-  tokenUsage    Json      @default("{}") @map("token_usage")
-  startedAt     DateTime  @default(now()) @map("started_at")
-  completedAt   DateTime? @map("completed_at")
+  status        RunStatus  @default(RUNNING)
+  /// TokenUsage from @codepilot/agent-core.
+  tokenUsage    Json       @default("{}") @map("token_usage")
+  error         String?
+  startedAt     DateTime   @default(now()) @map("started_at")
+  completedAt   DateTime?  @map("completed_at")
 
-  task    AgentTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  patches Patch[]
+  task         AgentTask            @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  patches      Patch[]
+  plans        ImplementationPlan[]
+  usageRecords UsageRecord[]
 
   @@unique([taskId, attemptNumber])
   @@map("agent_runs")
 }
 
 model ImplementationPlan {
-  id         String    @id @default(uuid()) @db.Uuid
-  taskId     String    @map("task_id") @db.Uuid
-  version    Int
+  id           String     @id @default(uuid()) @db.Uuid
+  taskId       String     @map("task_id") @db.Uuid
+  version      Int
   /// ImplementationPlan from @codepilot/contracts, validated before insert.
-  planJson   Json      @map("plan_json")
-  approvedAt DateTime? @map("approved_at")
-  createdAt  DateTime  @default(now()) @map("created_at")
+  planJson     Json       @map("plan_json")
+  status       PlanStatus @default(PROPOSED)
+  /// The run that produced this plan.
+  runId        String?    @map("run_id") @db.Uuid
+  model        String
+  /// What the reviewer asked to change; set with CHANGES_REQUESTED.
+  feedback     String?
+  reviewedById String?    @map("reviewed_by") @db.Uuid
+  reviewedAt   DateTime?  @map("reviewed_at")
+  approvedAt   DateTime?  @map("approved_at")
+  createdAt    DateTime   @default(now()) @map("created_at")
 
-  task AgentTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  task       AgentTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  run        AgentRun? @relation(fields: [runId], references: [id], onDelete: SetNull)
+  reviewedBy User?     @relation(fields: [reviewedById], references: [id], onDelete: SetNull)
 
   @@unique([taskId, version])
   @@map("implementation_plans")
@@ -453,12 +479,15 @@ model UsageRecord {
   inputTokens   Int      @map("input_tokens")
   outputTokens  Int      @map("output_tokens")
   estimatedCost Decimal  @map("estimated_cost") @db.Decimal(12, 6)
+  runId         String?  @map("run_id") @db.Uuid
   createdAt     DateTime @default(now()) @map("created_at")
 
   user User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   task AgentTask? @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  run  AgentRun?  @relation(fields: [runId], references: [id], onDelete: SetNull)
 
   @@index([userId, createdAt])
+  @@index([taskId])
   @@map("usage_records")
 }
 
