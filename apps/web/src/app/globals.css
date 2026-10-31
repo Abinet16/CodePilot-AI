@@ -306,3 +306,41 @@ h2 {
   padding-top: 16px;
   border-top: 1px solid var(--border);
 }
+
+.diff {
+  overflow-x: auto;
+  max-height: 640px;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 12px 0;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.diff span {
+  display: block;
+  min-height: 1.5em;
+  padding: 0 12px;
+  white-space: pre;
+}
+
+.diff-file {
+  font-weight: 600;
+  margin-top: 8px;
+}
+
+.diff-meta,
+.diff-hunk {
+  color: var(--muted);
+}
+
+.diff-add {
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 10%, transparent);
+}
+
+.diff-del {
+  color: var(--bad);
+  background: color-mix(in srgb, var(--bad) 10%, transparent);
+}
