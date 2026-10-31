@@ -3,14 +3,14 @@ import { MAX_PLAN_VERSIONS } from "@codepilot/contracts";
 import type { Prisma } from "@prisma/client";
 import { PrismaClient } from "@prisma/client";
 import { TransientError, runPipeline } from "../src/pipeline";
-import type { StructuredModel, ModelRequest, ModelResponse } from "../src/model/structured-model";
+import type { StructuredModel } from "../src/model/structured-model";
 import { ModelRefusalError } from "../src/model/structured-model";
 import { createPlanStage } from "../src/planning/plan-stage";
 import { RunRecorder } from "../src/runs";
 import { TaskStateStore } from "../src/task-state";
+import { ScriptedModel, answer, usage } from "./scripted-model";
 
 const SHA = "d".repeat(40);
-const usage = { inputTokens: 3_000, outputTokens: 1_000, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 };
 
 const analysis: ContextPackage = {
   repository: "acme/shop",
@@ -51,24 +51,6 @@ function planAnswer(affectedFiles = [{ path: "src/pagination.ts", change: "modif
     },
   };
 }
-
-type Script = Array<ModelResponse | Error | ((req: ModelRequest) => Promise<ModelResponse>)>;
-
-/** Replays scripted answers and records each prompt it was sent. */
-class ScriptedModel implements StructuredModel {
-  readonly model = "claude-opus-5-5";
-  readonly prompts: string[] = [];
-  constructor(private readonly script: Script) {}
-  async generate(req: ModelRequest): Promise<ModelResponse> {
-    this.prompts.push(req.prompt);
-    const step = this.script.shift();
-    if (!step) throw new Error("script exhausted");
-    if (step instanceof Error) throw step;
-    return typeof step === "function" ? step(req) : step;
-  }
-}
-
-const answer = (output: unknown, model = "claude-opus-5-5"): ModelResponse => ({ output, problem: null, model, usage });
 
 /** Requires a migrated PostgreSQL at DATABASE_URL. */
 describe("planning stage (PostgreSQL)", () => {
