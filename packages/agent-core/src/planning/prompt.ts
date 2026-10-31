@@ -1,5 +1,6 @@
 import type { ContextPackage, ImplementationPlan } from "@codepilot/contracts";
 import { MAX_PLAN_VERSIONS } from "@codepilot/contracts";
+import { assertNonce, untrusted } from "../prompt-fence";
 
 /**
  * Stable across every planning request, so it can be cached. Everything that
@@ -45,13 +46,9 @@ export interface PlanningPromptInput {
   nonce: string;
 }
 
-function untrusted(nonce: string, label: string, body: string): string {
-  return `<untrusted-${nonce} source="${label}">\n${body}\n</untrusted-${nonce}>`;
-}
-
 export function buildPlanningPrompt(input: PlanningPromptInput): string {
   const { task, analysis, revision, validationProblems, nonce } = input;
-  if (!/^[a-z0-9]{8,}$/.test(nonce)) throw new Error("nonce must be at least 8 lowercase alphanumeric characters");
+  assertNonce(nonce);
   const profile = analysis.profile;
   const sections: string[] = [];
 
