@@ -12,7 +12,7 @@ import {
 import type { InstallationGitHub } from "@codepilot/github";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import type { StageHandler } from "../pipeline";
-import { fetchCommit, githubRemoteUrl } from "./git";
+import { fetchCommit, githubRemoteUrl } from "../git/git";
 import type { ContextRetriever } from "./retriever";
 import { scanRepository } from "./scan";
 import type { Snapshot, SnapshotStore } from "./snapshot-store";
