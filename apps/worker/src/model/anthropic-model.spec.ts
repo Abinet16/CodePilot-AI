@@ -18,18 +18,19 @@ function message(overrides: Partial<Anthropic.Beta.BetaMessage>): Anthropic.Beta
   } as Anthropic.Beta.BetaMessage;
 }
 
-function modelWith(create: jest.Mock) {
-  return new AnthropicModel({ model: "claude-opus-5-5", effort: "high", client: { create } as unknown as MessagesClient });
+/** A stub client whose stream resolves or rejects the way `finalMessage` would. */
+function modelWith(finalMessage: jest.Mock, stream = jest.fn().mockReturnValue({ finalMessage })) {
+  return new AnthropicModel({ model: "claude-opus-5-5", effort: "high", client: { stream } as unknown as MessagesClient });
 }
 
 const request = { system: "sys", prompt: "plan this", schema: { type: "object" }, maxOutputTokens: 8_000, signal: new AbortController().signal };
 
 describe("AnthropicModel", () => {
-  it("requests structured output with adaptive thinking and server-side fallback", async () => {
-    const create = jest.fn().mockResolvedValue(message({}));
-    const response = await modelWith(create).generate(request);
+  it("streams a structured-output request with adaptive thinking and server-side fallback", async () => {
+    const stream = jest.fn().mockReturnValue({ finalMessage: jest.fn().mockResolvedValue(message({})) });
+    const response = await modelWith(jest.fn(), stream).generate(request);
 
-    const [params, options] = create.mock.calls[0];
+    const [params, options] = stream.mock.calls[0];
     expect(params).toMatchObject({
       model: "claude-opus-5-5",
       max_tokens: 8_000,

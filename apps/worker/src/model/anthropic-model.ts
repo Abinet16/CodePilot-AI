@@ -6,7 +6,7 @@ import { ModelRefusalError } from "./structured-model";
 export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
 
 /** The subset of the SDK client this adapter uses, so tests can pass a stub. */
-export type MessagesClient = Pick<Anthropic["beta"]["messages"], "create">;
+export type MessagesClient = Pick<Anthropic["beta"]["messages"], "stream">;
 
 export interface AnthropicModelOptions {
   model: string;
@@ -36,7 +36,8 @@ export class AnthropicModel implements StructuredModel {
   async generate(request: ModelRequest): Promise<ModelResponse> {
     let response: Anthropic.Beta.BetaMessage;
     try {
-      response = await this.options.client.create(
+      // Streamed so long answers (a patch can run to tens of thousands of tokens) never hit a request timeout.
+      const stream = this.options.client.stream(
         {
           model: this.options.model,
           max_tokens: request.maxOutputTokens,
@@ -49,6 +50,7 @@ export class AnthropicModel implements StructuredModel {
         },
         { signal: request.signal },
       );
+      response = await stream.finalMessage();
     } catch (err) {
       throw classify(err);
     }
