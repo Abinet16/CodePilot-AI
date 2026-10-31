@@ -14,7 +14,7 @@ issue → analyze repo (pinned SHA) → structured plan → [human approves] →
 | Week 1 | Monorepo, schema, state machine, safety policies, CI | ✅ done |
 | Week 2 | GitHub sign-in, GitHub App, webhooks, repository access, audit log | ✅ done |
 | `v0.1` | Secure GitHub connection and repository analysis (week 3: tasks, pinned commits, indexing, context retrieval) | ✅ done |
-| `v0.2` | Structured plans and patch generation (week 4: Claude-generated plans, human plan review, runs and usage, timeouts, retries, cancellation) | 🚧 week 4 done, patches in week 5 |
+| `v0.2` | Structured plans and patch generation (week 4: Claude-generated plans, human plan review, runs and usage, timeouts, retries, cancellation; week 5: plan-bound patches committed on a task branch, versioned with their diff) | ✅ done |
 | `v0.3` | Sandboxed tests and bounded repair loop | ⏳ week 6 |
 | `v0.4` | Automated draft pull requests | ⏳ week 7 |
 | `v1.0` | Deployed, evaluated, documented product | ⏳ weeks 8–10 |
@@ -26,7 +26,7 @@ apps/web               Next.js dashboard
 apps/api               NestJS REST API (auth, GitHub App, webhooks, tasks)
 apps/worker            BullMQ consumer that drives the agent state machine
 packages/contracts     Task statuses + transitions, plan schema, queue payloads (zod)
-packages/agent-core    Safety policies, analysis (filtering, project detection, symbols, chunking, context budgets), planning (prompt, output schema, plan validation, pricing)
+packages/agent-core    Safety policies, analysis (filtering, project detection, symbols, chunking, context budgets), planning (prompt, output schema, plan validation, pricing), patching (prompt, output schema, edits, plan conformance, limits), branch policy
 packages/github        GitHub App auth and installation-scoped REST calls (API + worker)
 packages/config        Shared tsconfig and Jest preset
 services/sandbox-runner  Isolated execution of configured check commands (week 6)
@@ -48,9 +48,9 @@ pnpm dev                # web :3000, api :4000/api, worker
 
 Check `http://localhost:4000/api/health`, or open `http://localhost:3000` to see system status.
 
-With a repository enabled, start a task at `/tasks/new`. The worker pins the default branch's head commit, indexes it, and asks Claude for a structured implementation plan grounded in the code it found. The task page shows the plan, the files it touches and why, and the tokens and estimated cost of each model call. Approve the plan, or request changes and get a revised version (up to 3).
+With a repository enabled, start a task at `/tasks/new`. The worker pins the default branch's head commit, indexes it, and asks Claude for a structured implementation plan grounded in the code it found. The task page shows the plan, the files it touches and why, and the tokens and estimated cost of each model call. Approve the plan, or request changes and get a revised version (up to 3). Once approved, the worker implements the plan in a disposable checkout of the pinned commit, commits it on a `codepilot/…` branch, and the task page shows the commit, the files changed, and the diff.
 
-Planning needs `ANTHROPIC_API_KEY` in `.env`; without it, tasks fail at `PLANNING` with a clear reason. Patch generation arrives in week 5, so an approved plan currently stops with `No stage handler is implemented for GENERATING_PATCH yet`.
+Planning and patch generation need `ANTHROPIC_API_KEY` in `.env`; without it, tasks fail at `PLANNING` with a clear reason. Checks run in week 6, so a task with a patch currently stops with `No stage handler is implemented for RUNNING_CHECKS yet`; the patch stays stored and visible. Nothing is pushed to GitHub yet.
 
 To sign in and connect repositories, create a GitHub App first: see [docs/api/github-app-setup.md](docs/api/github-app-setup.md). Without one, GitHub routes return `503` in development. Endpoints are listed in [docs/api/endpoints.md](docs/api/endpoints.md).
 
