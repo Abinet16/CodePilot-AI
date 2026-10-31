@@ -1,39 +1,39 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { TransientError } from "../pipeline";
-import type { PlanModel, PlanModelRequest, PlanModelResponse } from "./plan-model";
-import { ModelRefusalError } from "./plan-model";
+import type { StructuredModel, ModelRequest, ModelResponse } from "./structured-model";
+import { ModelRefusalError } from "./structured-model";
 
 export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
 
 /** The subset of the SDK client this adapter uses, so tests can pass a stub. */
 export type MessagesClient = Pick<Anthropic["beta"]["messages"], "create">;
 
-export interface AnthropicPlanModelOptions {
+export interface AnthropicModelOptions {
   model: string;
   effort: Effort;
   client: MessagesClient;
 }
 
 /**
- * Planning through the Claude Messages API with structured outputs, so the
- * answer is JSON in the planning schema. Server-side fallback is enabled: if
+ * Structured answers from the Claude Messages API: the answer is JSON in the
+ * schema the stage passes. Server-side fallback is enabled: if
  * the requested model declines on policy grounds, the API re-runs the request
  * on a fallback model in the same call, and `response.model` names it.
  */
-export class AnthropicPlanModel implements PlanModel {
+export class AnthropicModel implements StructuredModel {
   readonly model: string;
 
-  constructor(private readonly options: AnthropicPlanModelOptions) {
+  constructor(private readonly options: AnthropicModelOptions) {
     this.model = options.model;
   }
 
-  static fromApiKey(apiKey: string, model: string, effort: Effort, timeoutMs: number): AnthropicPlanModel {
+  static fromApiKey(apiKey: string, model: string, effort: Effort, timeoutMs: number): AnthropicModel {
     // The SDK retries 408/409/429/5xx and connection errors twice on its own before we see them.
     const client = new Anthropic({ apiKey, maxRetries: 2, timeout: timeoutMs });
-    return new AnthropicPlanModel({ model, effort, client: client.beta.messages });
+    return new AnthropicModel({ model, effort, client: client.beta.messages });
   }
 
-  async generate(request: PlanModelRequest): Promise<PlanModelResponse> {
+  async generate(request: ModelRequest): Promise<ModelResponse> {
     let response: Anthropic.Beta.BetaMessage;
     try {
       response = await this.options.client.create(
@@ -65,7 +65,7 @@ export class AnthropicPlanModel implements PlanModel {
       throw new ModelRefusalError(response.stop_details?.category ?? null, response.model, usage);
     }
     if (response.stop_reason === "max_tokens") {
-      return { ...base, output: null, problem: "The answer was cut off at the output token limit; produce a shorter plan." };
+      return { ...base, output: null, problem: "The answer was cut off at the output token limit; produce a shorter answer." };
     }
 
     const text = response.content

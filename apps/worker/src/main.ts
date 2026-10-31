@@ -12,7 +12,7 @@ import { WorkspaceManager } from "./analysis/workspace";
 import { watchForCancellation } from "./cancellation";
 import { loadConfig } from "./config";
 import { runPipeline } from "./pipeline";
-import { AnthropicPlanModel } from "./planning/anthropic-plan-model";
+import { AnthropicModel } from "./model/anthropic-model";
 import { createPlanStage } from "./planning/plan-stage";
 import { RunRecorder } from "./runs";
 import { StaleTransitionError, TaskStateStore } from "./task-state";
@@ -31,7 +31,7 @@ async function main(): Promise<void> {
   if (!github) console.warn("[worker] GitHub App is not configured; repository analysis will fail");
 
   const planModel = config.ANTHROPIC_API_KEY
-    ? AnthropicPlanModel.fromApiKey(config.ANTHROPIC_API_KEY, config.PLANNING_MODEL, config.PLANNING_EFFORT, config.MODEL_TIMEOUT_SECONDS * 1000)
+    ? AnthropicModel.fromApiKey(config.ANTHROPIC_API_KEY, config.PLANNING_MODEL, config.PLANNING_EFFORT, config.MODEL_TIMEOUT_SECONDS * 1000)
     : null;
   if (!planModel) console.warn("[worker] ANTHROPIC_API_KEY is not set; planning will fail");
 

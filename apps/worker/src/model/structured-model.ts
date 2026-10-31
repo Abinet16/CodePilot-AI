@@ -1,6 +1,6 @@
 import type { TokenUsage } from "@codepilot/agent-core";
 
-export interface PlanModelRequest {
+export interface ModelRequest {
   system: string;
   prompt: string;
   /** JSON schema the answer must follow. */
@@ -9,7 +9,7 @@ export interface PlanModelRequest {
   signal: AbortSignal;
 }
 
-export interface PlanModelResponse {
+export interface ModelResponse {
   /** The parsed JSON answer, or null when the model produced none (see `problem`). */
   output: unknown;
   /** Why `output` is null, phrased so it can be fed back to the model. */
@@ -19,11 +19,11 @@ export interface PlanModelResponse {
   usage: TokenUsage;
 }
 
-/** The provider boundary for planning. Tests substitute a scripted fake. */
-export interface PlanModel {
+/** The provider boundary for stages that ask a model for structured JSON. Tests substitute a scripted fake. */
+export interface StructuredModel {
   /** The model requested on every call. */
   readonly model: string;
-  generate(request: PlanModelRequest): Promise<PlanModelResponse>;
+  generate(request: ModelRequest): Promise<ModelResponse>;
 }
 
 /** The provider declined to answer. Retrying the same prompt will not help. A refusal is still billed. */
@@ -33,7 +33,7 @@ export class ModelRefusalError extends Error {
     readonly model: string,
     readonly usage: TokenUsage,
   ) {
-    super(`The model declined to plan this task${category ? ` (${category})` : ""}`);
+    super(`The model declined the request${category ? ` (${category})` : ""}`);
     this.name = "ModelRefusalError";
   }
 }

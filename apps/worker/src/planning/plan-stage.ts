@@ -7,13 +7,13 @@ import { Prisma } from "@prisma/client";
 import type { PrismaClient } from "@prisma/client";
 import type { StageHandler } from "../pipeline";
 import type { RunRecorder } from "../runs";
-import type { PlanModel } from "./plan-model";
-import { ModelRefusalError } from "./plan-model";
+import type { StructuredModel } from "../model/structured-model";
+import { ModelRefusalError } from "../model/structured-model";
 
 export interface PlanStageDeps {
   prisma: PrismaClient;
   /** Null when no model provider is configured for this worker. */
-  model: PlanModel | null;
+  model: StructuredModel | null;
   runs: RunRecorder;
   /** Model calls per planning round; later calls get the earlier validation problems as feedback. */
   maxAttempts: number;
@@ -96,7 +96,7 @@ export function createPlanStage(deps: PlanStageDeps): StageHandler {
         const message = err instanceof Error ? err.message : String(err);
         if (err instanceof ModelRefusalError) {
           await deps.runs.finish(run.id, { status: "FAILED", error: message, usage: err.usage, servedModel: err.model });
-          throw new PlanningError(message);
+          throw new PlanningError(`The model declined to plan this task${err.category ? ` (${err.category})` : ""}`);
         }
         await deps.runs.finish(run.id, { status: signal.aborted ? "CANCELLED" : "FAILED", error: message });
         throw err;

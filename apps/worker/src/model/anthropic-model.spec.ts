@@ -1,8 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { TransientError } from "../pipeline";
-import type { MessagesClient } from "./anthropic-plan-model";
-import { AnthropicPlanModel } from "./anthropic-plan-model";
-import { ModelRefusalError } from "./plan-model";
+import type { MessagesClient } from "./anthropic-model";
+import { AnthropicModel } from "./anthropic-model";
+import { ModelRefusalError } from "./structured-model";
 
 function message(overrides: Partial<Anthropic.Beta.BetaMessage>): Anthropic.Beta.BetaMessage {
   return {
@@ -19,12 +19,12 @@ function message(overrides: Partial<Anthropic.Beta.BetaMessage>): Anthropic.Beta
 }
 
 function modelWith(create: jest.Mock) {
-  return new AnthropicPlanModel({ model: "claude-opus-5-5", effort: "high", client: { create } as unknown as MessagesClient });
+  return new AnthropicModel({ model: "claude-opus-5-5", effort: "high", client: { create } as unknown as MessagesClient });
 }
 
 const request = { system: "sys", prompt: "plan this", schema: { type: "object" }, maxOutputTokens: 8_000, signal: new AbortController().signal };
 
-describe("AnthropicPlanModel", () => {
+describe("AnthropicModel", () => {
   it("requests structured output with adaptive thinking and server-side fallback", async () => {
     const create = jest.fn().mockResolvedValue(message({}));
     const response = await modelWith(create).generate(request);

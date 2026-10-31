@@ -3,8 +3,8 @@ import { MAX_PLAN_VERSIONS } from "@codepilot/contracts";
 import type { Prisma } from "@prisma/client";
 import { PrismaClient } from "@prisma/client";
 import { TransientError, runPipeline } from "../src/pipeline";
-import type { PlanModel, PlanModelRequest, PlanModelResponse } from "../src/planning/plan-model";
-import { ModelRefusalError } from "../src/planning/plan-model";
+import type { StructuredModel, ModelRequest, ModelResponse } from "../src/model/structured-model";
+import { ModelRefusalError } from "../src/model/structured-model";
 import { createPlanStage } from "../src/planning/plan-stage";
 import { RunRecorder } from "../src/runs";
 import { TaskStateStore } from "../src/task-state";
@@ -52,14 +52,14 @@ function planAnswer(affectedFiles = [{ path: "src/pagination.ts", change: "modif
   };
 }
 
-type Script = Array<PlanModelResponse | Error | ((req: PlanModelRequest) => Promise<PlanModelResponse>)>;
+type Script = Array<ModelResponse | Error | ((req: ModelRequest) => Promise<ModelResponse>)>;
 
 /** Replays scripted answers and records each prompt it was sent. */
-class ScriptedModel implements PlanModel {
+class ScriptedModel implements StructuredModel {
   readonly model = "claude-opus-5-5";
   readonly prompts: string[] = [];
   constructor(private readonly script: Script) {}
-  async generate(req: PlanModelRequest): Promise<PlanModelResponse> {
+  async generate(req: ModelRequest): Promise<ModelResponse> {
     this.prompts.push(req.prompt);
     const step = this.script.shift();
     if (!step) throw new Error("script exhausted");
@@ -68,7 +68,7 @@ class ScriptedModel implements PlanModel {
   }
 }
 
-const answer = (output: unknown, model = "claude-opus-5-5"): PlanModelResponse => ({ output, problem: null, model, usage });
+const answer = (output: unknown, model = "claude-opus-5-5"): ModelResponse => ({ output, problem: null, model, usage });
 
 /** Requires a migrated PostgreSQL at DATABASE_URL. */
 describe("planning stage (PostgreSQL)", () => {
@@ -94,7 +94,7 @@ describe("planning stage (PostgreSQL)", () => {
     });
   }
 
-  async function plan(taskId: string, model: PlanModel | null, options: { budget?: number; canRetry?: boolean; signal?: AbortSignal } = {}) {
+  async function plan(taskId: string, model: StructuredModel | null, options: { budget?: number; canRetry?: boolean; signal?: AbortSignal } = {}) {
     const stage = createPlanStage({
       prisma,
       model,
