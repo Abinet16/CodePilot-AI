@@ -32,6 +32,7 @@ export const PatchProposalSchema = z.object({
     .trim()
     .min(1)
     .max(72)
+    // eslint-disable-next-line no-control-regex -- rejecting control characters is the point
     .refine((s) => !/[\u0000-\u001f\u007f]/.test(s), "must be a single line without control characters"),
   files: z.array(PatchFileSchema).min(1).max(25),
 });
