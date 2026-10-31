@@ -31,6 +31,22 @@ const EnvSchema = z.object({
   /** Model calls per planning round before invalid output fails the task. */
   PLANNING_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(5).default(2),
   PLANNING_MAX_OUTPUT_TOKENS: z.coerce.number().int().min(4_000).max(64_000).default(16_000),
+  /** Patch generation implements the approved plan. A patch carries whole new files, so it gets a larger output limit. */
+  PATCH_MODEL: z
+    .string()
+    .default("claude-opus-5-5")
+    .refine(isPricedModel, { message: "has no entry in MODEL_PRICING, so its usage could not be costed" }),
+  PATCH_EFFORT: z.enum(["low", "medium", "high", "xhigh", "max"]).default("high"),
+  PATCH_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(5).default(2),
+  PATCH_MAX_OUTPUT_TOKENS: z.coerce.number().int().min(8_000).max(128_000).default(32_000),
+  /** Largest file the agent may edit or create. */
+  PATCH_MAX_FILE_KB: z.coerce.number().int().min(16).max(2_048).default(256),
+  /** Added plus deleted lines one patch may contain. */
+  PATCH_MAX_CHANGED_LINES: z.coerce.number().int().min(10).max(20_000).default(1_500),
+  /** Author and committer of agent commits. The default address is deliberately unroutable (.invalid). */
+  PATCH_AUTHOR_NAME: z.string().min(1).max(100).default("CodePilot AI"),
+  PATCH_AUTHOR_EMAIL: z.string().email().default("codepilot@codepilot.invalid"),
+
   /** Input plus output tokens one task may spend across all of its model calls. */
   TASK_TOKEN_BUDGET: z.coerce.number().int().min(10_000).default(400_000),
   MODEL_TIMEOUT_SECONDS: z.coerce.number().int().min(30).max(1_800).default(300),
@@ -38,6 +54,7 @@ const EnvSchema = z.object({
   /** Wall-clock limits per stage; a stage that runs longer fails the task. */
   ANALYZE_TIMEOUT_SECONDS: z.coerce.number().int().min(30).max(3_600).default(600),
   PLAN_TIMEOUT_SECONDS: z.coerce.number().int().min(30).max(3_600).default(900),
+  PATCH_TIMEOUT_SECONDS: z.coerce.number().int().min(30).max(3_600).default(1_200),
   /** How often a running job checks whether its task was cancelled. */
   CANCELLATION_POLL_MS: z.coerce.number().int().min(250).max(60_000).default(2_000),
 });
