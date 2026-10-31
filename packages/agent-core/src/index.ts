@@ -1,4 +1,5 @@
 export * from "./path-policy";
+export * from "./branch-policy";
 export * from "./command-policy";
 export * from "./repair-policy";
 export * from "./prompt-fence";
