@@ -290,6 +290,7 @@ model ImplementationPlan {
   task       AgentTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
   run        AgentRun? @relation(fields: [runId], references: [id], onDelete: SetNull)
   reviewedBy User?     @relation(fields: [reviewedById], references: [id], onDelete: SetNull)
+  patches    Patch[]
 
   @@unique([taskId, version])
   @@map("implementation_plans")
@@ -372,21 +373,44 @@ model CodeSymbol {
   @@map("code_symbols")
 }
 
+/// One patch attempt for a task. Attempts are versioned and never overwritten,
+/// so a repair keeps the history of every earlier attempt.
 model Patch {
-  id           String      @id @default(uuid()) @db.Uuid
-  taskId       String      @map("task_id") @db.Uuid
-  runId        String      @map("run_id") @db.Uuid
-  baseSha      String      @map("base_sha")
-  patchContent String      @map("patch_content")
-  diffHash     String      @map("diff_hash")
-  status       PatchStatus @default(PROPOSED)
-  createdAt    DateTime    @default(now()) @map("created_at")
+  id                 String      @id @default(uuid()) @db.Uuid
+  taskId             String      @map("task_id") @db.Uuid
+  /// Counts patch attempts on the task, starting at 1.
+  version            Int
+  /// The approved plan this patch implements.
+  planId             String      @map("plan_id") @db.Uuid
+  runId              String      @map("run_id") @db.Uuid
+  baseSha            String      @map("base_sha")
+  branchName         String      @map("branch_name")
+  /// The local commit made in the workspace. It is not pushed until OPENING_PR.
+  commitSha          String      @map("commit_sha")
+  /// Lets a later stage rebuild the workspace from base_sha and the diff, and prove it matches.
+  treeSha            String      @map("tree_sha")
+  summary            String
+  commitMessage      String      @map("commit_message")
+  model              String
+  /// Unified diff against base_sha (`git diff --binary --full-index`).
+  patchContent       String      @map("patch_content")
+  diffHash           String      @map("diff_hash")
+  /// PatchFileStat[] from @codepilot/contracts.
+  files              Json
+  /// Planned paths the patch left unchanged.
+  unchangedPlanFiles String[]    @map("unchanged_plan_files")
+  additions          Int
+  deletions          Int
+  status             PatchStatus @default(PROPOSED)
+  createdAt          DateTime    @default(now()) @map("created_at")
 
-  task     AgentTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  run      AgentRun  @relation(fields: [runId], references: [id], onDelete: Cascade)
+  task     AgentTask          @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  plan     ImplementationPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  run      AgentRun           @relation(fields: [runId], references: [id], onDelete: Cascade)
   testRuns TestRun[]
 
-  @@unique([taskId, diffHash])
+  @@unique([taskId, version])
+  @@index([taskId, diffHash])
   @@map("patches")
 }
 
