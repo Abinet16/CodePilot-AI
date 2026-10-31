@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ContextPackage } from "./analysis";
+import type { PatchSummary } from "./patch";
 import type { PlanSummary } from "./plan";
 import type { TaskStatus } from "./task-status";
 
@@ -71,6 +72,8 @@ export interface TaskDetail extends TaskSummary {
   analysis: ContextPackage | null;
   /** Oldest first; the last one is the current plan. */
   plans: PlanSummary[];
+  /** Oldest first. Diffs are fetched one version at a time. */
+  patches: PatchSummary[];
   runs: AgentRunSummary[];
   usage: UsageTotals;
   events: TaskEventSummary[];

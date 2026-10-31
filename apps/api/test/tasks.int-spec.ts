@@ -1,4 +1,4 @@
-import type { IssueSummary, RepositorySummary, TaskDetail, TaskJobKey, TaskSummary } from "@codepilot/contracts";
+import type { IssueSummary, PatchDetail, RepositorySummary, TaskDetail, TaskJobKey, TaskSummary } from "@codepilot/contracts";
 import { taskJobId } from "@codepilot/contracts";
 import type { NestExpressApplication } from "@nestjs/platform-express";
 import { Test } from "@nestjs/testing";
@@ -345,6 +345,56 @@ describe("tasks API (PostgreSQL)", () => {
     queue.fail = false;
     const task = await prisma.agentTask.findUniqueOrThrow({ where: { id } });
     expect(task).toMatchObject({ status: "FAILED", failureReason: "Could not enqueue the task" });
+  });
+
+  it("lists patch attempts on the task and serves each diff only to users who can see the task", async () => {
+    const id = await plannedTask();
+    await prisma.implementationPlan.update({ where: { taskId_version: { taskId: id, version: 1 } }, data: { status: "APPROVED", approvedAt: new Date() } });
+    const plan = await prisma.implementationPlan.findUniqueOrThrow({ where: { taskId_version: { taskId: id, version: 1 } } });
+    const run = await prisma.agentRun.create({ data: { taskId: id, attemptNumber: 2, stage: "GENERATING_PATCH", model: "claude-opus-5-5", status: "SUCCEEDED" } });
+    const files = [{ path: "src/pagination.ts", change: "modify", additions: 1, deletions: 1 }];
+    const diff = "diff --git a/src/pagination.ts b/src/pagination.ts\n-  return Math.floor(t / s);\n+  return Math.ceil(t / s);\n";
+    await prisma.patch.create({
+      data: {
+        taskId: id,
+        version: 1,
+        planId: plan.id,
+        runId: run.id,
+        baseSha: SHA,
+        branchName: `codepilot/fix-${id.slice(0, 8)}`,
+        commitSha: "c".repeat(40),
+        treeSha: "e".repeat(40),
+        summary: "Use Math.ceil",
+        commitMessage: "Fix pagination",
+        model: "claude-opus-5-5",
+        patchContent: diff,
+        diffHash: "f".repeat(64),
+        files,
+        unchangedPlanFiles: [],
+        additions: 1,
+        deletions: 1,
+      },
+    });
+
+    const detail = (await bob.get(`/api/tasks/${id}`).expect(200)).body as TaskDetail;
+    expect(detail.patches).toEqual([
+      expect.objectContaining({ version: 1, status: "PROPOSED", planVersion: 1, commitSha: "c".repeat(40), files, additions: 1, deletions: 1 }),
+    ]);
+    expect(detail.patches[0]).not.toHaveProperty("diff");
+
+    const patch = (await bob.get(`/api/tasks/${id}/patches/1`).expect(200)).body as PatchDetail;
+    expect(patch).toMatchObject({ version: 1, branchName: `codepilot/fix-${id.slice(0, 8)}`, diff });
+
+    await bob.get(`/api/tasks/${id}/patches/2`).expect(404);
+    await bob.get(`/api/tasks/${id}/patches/0`).expect(404);
+    await bob.get(`/api/tasks/${id}/patches/99999999999`).expect(404);
+    await bob.get(`/api/tasks/${id}/patches/one`).expect(400);
+
+    const privateTask = (await alice.post("/api/tasks").send(describeTask(aliceOnly.id)).expect(201)).body as TaskDetail;
+    const copy = await prisma.patch.findFirstOrThrow({ where: { taskId: id }, omit: { id: true, createdAt: true, files: true } });
+    await prisma.patch.create({ data: { ...copy, taskId: privateTask.id, files: [], patchContent: "secret diff" } });
+    await bob.get(`/api/tasks/${privateTask.id}/patches/1`).expect(404);
+    await request(app.getHttpServer()).get(`/api/tasks/${id}/patches/1`).expect(401);
   });
 
   it("removes pending resume jobs when a task under review is cancelled", async () => {

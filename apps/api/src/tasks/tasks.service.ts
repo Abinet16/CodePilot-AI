@@ -4,6 +4,9 @@ import type {
   ContextPackage,
   CreateTaskRequest,
   ImplementationPlan,
+  PatchDetail,
+  PatchFileStat,
+  PatchSummary,
   RepositoryPermission,
   TaskDetail,
   TaskJobKey,
@@ -19,7 +22,7 @@ import {
   hasPermission,
   isTerminal,
 } from "@codepilot/contracts";
-import type { AgentRun, AgentTask, ImplementationPlan as PlanRow, Issue, Prisma, Repository, TaskEvent } from "@prisma/client";
+import type { AgentRun, AgentTask, ImplementationPlan as PlanRow, Issue, Patch, Prisma, Repository, TaskEvent } from "@prisma/client";
 import { AuditService } from "../audit/audit.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { TaskQueue } from "./task-queue";
@@ -48,11 +51,34 @@ function toSummary(task: TaskRow): TaskSummary {
   };
 }
 
+type PatchRow = Omit<Patch, "patchContent"> & { plan: { version: number } };
+
 type DetailRow = TaskRow & {
   events: TaskEvent[];
   runs: AgentRun[];
   plans: Array<PlanRow & { reviewedBy: { githubLogin: string } | null }>;
+  patches: PatchRow[];
 };
+
+function toPatchSummary(p: PatchRow): PatchSummary {
+  return {
+    version: p.version,
+    status: p.status,
+    planVersion: p.plan.version,
+    baseSha: p.baseSha,
+    commitSha: p.commitSha,
+    treeSha: p.treeSha,
+    branchName: p.branchName,
+    summary: p.summary,
+    commitMessage: p.commitMessage,
+    model: p.model,
+    files: p.files as unknown as PatchFileStat[],
+    unchangedPlanFiles: p.unchangedPlanFiles,
+    additions: p.additions,
+    deletions: p.deletions,
+    createdAt: p.createdAt.toISOString(),
+  };
+}
 
 function runTokens(run: AgentRun): { inputTokens: number; outputTokens: number } {
   const u = (run.tokenUsage ?? {}) as Record<string, unknown>;
@@ -95,6 +121,7 @@ function toDetail(task: DetailRow, usage: UsageTotals): TaskDetail {
         createdAt: p.createdAt.toISOString(),
       };
     }),
+    patches: task.patches.map(toPatchSummary),
     runs: task.runs.map(toRunSummary),
     usage,
     events: task.events.map((e) => ({
@@ -114,6 +141,8 @@ const detailInclude = {
   events: { orderBy: { createdAt: "asc" } },
   runs: { orderBy: { attemptNumber: "asc" } },
   plans: { orderBy: { version: "asc" }, include: { reviewedBy: { select: { githubLogin: true } } } },
+  // Diffs can be large, so the detail leaves them out; they are fetched one version at a time.
+  patches: { orderBy: { version: "asc" }, omit: { patchContent: true }, include: { plan: { select: { version: true } } } },
 } satisfies Prisma.AgentTaskInclude;
 
 /**
@@ -196,6 +225,18 @@ export class TasksService {
       outputTokens: sum._sum.outputTokens ?? 0,
       estimatedCostUsd: Number(sum._sum.estimatedCost ?? 0),
     });
+  }
+
+  /** One patch version with its diff, under the same visibility rule as the task. */
+  async getPatch(userId: string, taskId: string, version: number): Promise<PatchDetail> {
+    if (version < 1 || version > 2_147_483_647) throw new NotFoundException("Patch not found");
+    const patch = await this.prisma.patch.findFirst({
+      where: { taskId, version, task: { repository: { removedAt: null, access: { some: { userId } } } } },
+      include: { plan: { select: { version: true } } },
+    });
+    if (!patch) throw new NotFoundException("Patch not found");
+    const { patchContent, ...rest } = patch;
+    return { ...toPatchSummary(rest), diff: patchContent };
   }
 
   async cancel(userId: string, taskId: string): Promise<TaskDetail> {

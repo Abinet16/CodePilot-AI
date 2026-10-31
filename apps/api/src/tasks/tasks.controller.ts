@@ -1,9 +1,10 @@
-import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Query, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, HttpCode, Param, ParseIntPipe, ParseUUIDPipe, Post, Query, UseGuards } from "@nestjs/common";
 import {
   ApprovePlanRequest,
   ApprovePlanRequestSchema,
   CreateTaskRequest,
   CreateTaskRequestSchema,
+  PatchDetail,
   RequestPlanChangesRequest,
   RequestPlanChangesRequestSchema,
   TaskDetail,
@@ -34,6 +35,15 @@ export class TasksController {
   @Get(":id")
   get(@CurrentUser() user: AuthUser, @Param("id", new ParseUUIDPipe()) id: string): Promise<TaskDetail> {
     return this.tasks.get(user.id, id);
+  }
+
+  @Get(":id/patches/:version")
+  getPatch(
+    @CurrentUser() user: AuthUser,
+    @Param("id", new ParseUUIDPipe()) id: string,
+    @Param("version", new ParseIntPipe()) version: number,
+  ): Promise<PatchDetail> {
+    return this.tasks.getPatch(user.id, id, version);
   }
 
   @Post(":id/cancel")
