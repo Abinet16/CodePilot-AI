@@ -46,23 +46,24 @@ export interface PlanningPromptInput {
   nonce: string;
 }
 
+/** The facts about the repository every prompt starts with. Detected, not taken from repository text. */
+export function projectSummary(analysis: ContextPackage): string {
+  const profile = analysis.profile;
+  return [
+    `Repository: ${analysis.repository} (branch ${analysis.branch}, commit ${analysis.commitSha})`,
+    `Primary language: ${profile.primaryLanguage ?? "unknown"}${profile.typescript ? " (TypeScript)" : ""}`,
+    `Package manager: ${profile.packageManager ?? "none detected"}`,
+    `Frameworks: ${profile.frameworks.join(", ") || "none detected"}`,
+    `Test frameworks: ${profile.testFrameworks.join(", ") || "none detected"} (${profile.testFileCount} test files)`,
+    `Scripts: ${Object.keys(profile.scripts).join(", ") || "none"}`,
+    `Monorepo: ${profile.monorepo ? "yes" : "no"}`,
+  ].join("\n");
+}
+
 export function buildPlanningPrompt(input: PlanningPromptInput): string {
   const { task, analysis, revision, validationProblems, nonce } = input;
   assertNonce(nonce);
-  const profile = analysis.profile;
-  const sections: string[] = [];
-
-  sections.push(
-    [
-      `Repository: ${analysis.repository} (branch ${analysis.branch}, commit ${analysis.commitSha})`,
-      `Primary language: ${profile.primaryLanguage ?? "unknown"}${profile.typescript ? " (TypeScript)" : ""}`,
-      `Package manager: ${profile.packageManager ?? "none detected"}`,
-      `Frameworks: ${profile.frameworks.join(", ") || "none detected"}`,
-      `Test frameworks: ${profile.testFrameworks.join(", ") || "none detected"} (${profile.testFileCount} test files)`,
-      `Scripts: ${Object.keys(profile.scripts).join(", ") || "none"}`,
-      `Monorepo: ${profile.monorepo ? "yes" : "no"}`,
-    ].join("\n"),
-  );
+  const sections: string[] = [projectSummary(analysis)];
 
   const label = task.issueNumber !== null ? `github-issue-${task.issueNumber}` : "task-description";
   sections.push(`The task to plan:\n${untrusted(nonce, label, task.request)}`);
