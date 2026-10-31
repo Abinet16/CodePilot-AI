@@ -1,11 +1,13 @@
-import type { TaskDetail } from "@codepilot/contracts";
+import type { PatchDetail, TaskDetail } from "@codepilot/contracts";
 import { MAX_PLAN_VERSIONS, isTerminal } from "@codepilot/contracts";
 import { notFound, redirect } from "next/navigation";
 import { apiGet } from "@/lib/api";
 import { StatusBadge } from "../status-badge";
 import { AutoRefresh } from "./auto-refresh";
 import { CancelButton } from "./cancel-button";
+import { DiffView } from "./diff-view";
 import { PlanReview } from "./plan-review";
+import { PatchView } from "./patch-view";
 import { PlanView } from "./plan-view";
 
 export const dynamic = "force-dynamic";
@@ -30,6 +32,11 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
   const currentPlan = task.plans.at(-1);
   const earlierPlans = task.plans.slice(0, -1).reverse();
   const awaitingReview = task.status === "AWAITING_PLAN_APPROVAL" && currentPlan?.status === "PROPOSED";
+  const currentPatch = task.patches.at(-1);
+  const earlierPatches = task.patches.slice(0, -1).reverse();
+  const patchDetail = currentPatch
+    ? await apiGet<PatchDetail>(`/tasks/${encodeURIComponent(id)}/patches/${currentPatch.version}`)
+    : null;
 
   return (
     <>
@@ -77,6 +84,26 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
         <section className="card">
           <h2>Implementation plan</h2>
           <p className="muted">The agent is writing a plan…</p>
+        </section>
+      )}
+
+      {currentPatch && (
+        <section className="card">
+          <h2>Patch</h2>
+          <PatchView patch={currentPatch} />
+          {patchDetail?.ok ? <DiffView diff={patchDetail.data.diff} /> : <p className="bad small">Could not load the diff.</p>}
+          {earlierPatches.map((p) => (
+            <details key={p.version} className="snippet">
+              <summary>Version {p.version}</summary>
+              <PatchView patch={p} />
+            </details>
+          ))}
+        </section>
+      )}
+      {!currentPatch && task.status === "GENERATING_PATCH" && (
+        <section className="card">
+          <h2>Patch</h2>
+          <p className="muted">The agent is writing the patch…</p>
         </section>
       )}
 
