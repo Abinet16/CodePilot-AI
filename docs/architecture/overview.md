@@ -85,4 +85,25 @@ agent_tasks.analysis (ContextPackage) + issue/description [+ previous plan and r
 - If a crash happens after a plan is stored but before the transition, the re-run reuses that plan instead of paying for another call.
 - Tasks created with `requirePlanApproval: false` store their plan as `APPROVED` and continue straight to `GENERATING_PATCH`.
 
-See [state-machine.md](./state-machine.md), [data-model.md](./data-model.md), [ADR 0004](../decisions/0004-repository-analysis-and-retrieval.md), and [ADR 0005](../decisions/0005-structured-planning-and-orchestration.md).
+## Patch generation (GENERATING_PATCH → RUNNING_CHECKS)
+
+```
+approved plan + pinned commit
+→ workspace: fetch base_sha (hardened git), switch to codepilot/<slug>-<task id>
+→ read planned files: regular tracked text files only (no symlinks, submodules, binaries), size-limited
+→ prompt: fixed system prompt + plan + current file contents, all untrusted text fenced
+→ Claude (streamed): { files: [{ path, change, edits: [{ find, replace }] | content }] }
+→ validate: Zod · path policy · file and change kind must match the plan · each find matches exactly once
+   └─ invalid → problems fed back, up to PATCH_MAX_ATTEMPTS
+→ write (realpath re-checked, new files O_EXCL) → git add <those paths> → status must show nothing else
+→ commit (fixed identity, task trailers) → diff vs base: kinds must match, size and binary limits
+   └─ too large / binary → reset to base, problems fed back
+→ patches (version n: plan, run, base, commit, tree, diff, per-file stats) → RUNNING_CHECKS
+→ workspace deleted
+```
+
+- Nothing is pushed. The stored diff rebuilds the same tree on a fresh checkout of `base_sha`, so later stages reconstruct the workspace from the database instead of keeping it.
+- A patch stored before a crash is reused for the same approved plan.
+- Planned files the patch left alone are recorded and shown to the reviewer.
+
+See [state-machine.md](./state-machine.md), [data-model.md](./data-model.md), [ADR 0004](../decisions/0004-repository-analysis-and-retrieval.md), [ADR 0005](../decisions/0005-structured-planning-and-orchestration.md), and [ADR 0006](../decisions/0006-patch-generation-and-git-workflow.md).

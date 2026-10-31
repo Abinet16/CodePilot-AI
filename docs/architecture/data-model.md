@@ -1,6 +1,6 @@
 # Data model
 
-Schema: `prisma/schema.prisma`. Migrations: `prisma/migrations/` (`init`, `auth_and_repository_access`, `repository_analysis`, `planning_and_runs`).
+Schema: `prisma/schema.prisma`. Migrations: `prisma/migrations/` (`init`, `auth_and_repository_access`, `repository_analysis`, `planning_and_runs`, `patch_attempts`).
 
 ```mermaid
 erDiagram
@@ -19,7 +19,9 @@ erDiagram
   issues |o--o{ agent_tasks : drives
   agent_tasks ||--o{ agent_runs : attempts
   agent_tasks ||--o{ implementation_plans : versions
+  agent_tasks ||--o{ patches : "attempts (versioned)"
   agent_runs ||--o{ patches : produces
+  implementation_plans ||--o{ patches : "implemented by"
   patches |o--o{ test_runs : verified_by
   test_runs ||--o{ test_results : contains
   agent_tasks ||--o{ pull_requests : opens
@@ -44,7 +46,7 @@ erDiagram
 | `agent_runs (task_id, attempt_number)` unique | One row per bounded attempt; retries can't collide |
 | `agent_tasks (repository_id, branch_name)` unique | Two tasks can never push to the same branch (NULLs allowed until a branch is assigned) |
 | `implementation_plans (task_id, version)` unique | Revisions append; earlier plans are kept. Reviews are a compare-and-set on `status = PROPOSED`, so a plan is approved or sent back exactly once |
-| `patches (task_id, diff_hash)` unique | Identical patch content is stored once per task |
+| `patches (task_id, version)` unique | Patch attempts append; a repair never overwrites an earlier attempt, even when it reproduces the same diff (`diff_hash` is indexed, not unique) |
 | `pull_requests (repository_id, github_pr_number)` unique | One row per real PR |
 | `idempotency_keys.key` primary key | Guards push/PR creation across retries and worker restarts |
 | `webhook_deliveries.delivery_id` primary key | GitHub's `X-GitHub-Delivery` dedupes redelivered webhooks |
@@ -58,4 +60,5 @@ erDiagram
 - `agent_tasks.analysis` stores the `ContextPackage` (pinned SHA, project profile, ranked snippets with line ranges) handed to planning. It is validated against the shared schema on write and again on read.
 - `agent_runs` has one row per model call: the `stage` that made it, the requested `model`, `token_usage` (input, output, cache write, cache read), and the `error` if it failed. Attempt numbers count across stages and queue retries.
 - `usage_records` has one row per **billed** call, linked to its run, priced at the model that actually answered (server-side fallback can change it) using `MODEL_PRICING` in `agent-core`. `input_tokens` includes cached input. The task token budget is checked against these rows.
+- `patches` stores each attempt: the approved plan it implements (`plan_id`), the run that wrote it, `base_sha`, the task `branch_name`, the local `commit_sha`, the `tree_sha`, the unified diff (`patch_content`, `--binary --full-index`) and its SHA-256, per-file stats (`files`), and `unchanged_plan_files`. The commit is never pushed from here. Applying the diff to `base_sha` must reproduce `tree_sha`, which is how later stages rebuild the workspace.
 - `implementation_plans.plan_json` is validated against `ImplementationPlanSchema` before insert and again on read; a plan that no longer validates is withheld from the API. `status` is `PROPOSED`, `APPROVED`, or `CHANGES_REQUESTED`, with `feedback`, `reviewed_by`, and `reviewed_at` recording the human review.
