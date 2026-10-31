@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { DEFAULT_PATCH_LIMITS } from "@codepilot/agent-core";
 import { JOBS, QUEUES, TaskStatus } from "@codepilot/contracts";
 import type { RunTaskJob } from "@codepilot/contracts";
 import { GitHubAppClient } from "@codepilot/github";
@@ -13,6 +14,7 @@ import { watchForCancellation } from "./cancellation";
 import { loadConfig } from "./config";
 import { runPipeline } from "./pipeline";
 import { AnthropicModel } from "./model/anthropic-model";
+import { createPatchStage } from "./patching/patch-stage";
 import { createPlanStage } from "./planning/plan-stage";
 import { RunRecorder } from "./runs";
 import { StaleTransitionError, TaskStateStore } from "./task-state";
@@ -30,10 +32,12 @@ async function main(): Promise<void> {
       : null;
   if (!github) console.warn("[worker] GitHub App is not configured; repository analysis will fail");
 
-  const planModel = config.ANTHROPIC_API_KEY
-    ? AnthropicModel.fromApiKey(config.ANTHROPIC_API_KEY, config.PLANNING_MODEL, config.PLANNING_EFFORT, config.MODEL_TIMEOUT_SECONDS * 1000)
-    : null;
-  if (!planModel) console.warn("[worker] ANTHROPIC_API_KEY is not set; planning will fail");
+  const modelTimeoutMs = config.MODEL_TIMEOUT_SECONDS * 1000;
+  const apiKey = config.ANTHROPIC_API_KEY;
+  const planModel = apiKey ? AnthropicModel.fromApiKey(apiKey, config.PLANNING_MODEL, config.PLANNING_EFFORT, modelTimeoutMs) : null;
+  const patchModel = apiKey ? AnthropicModel.fromApiKey(apiKey, config.PATCH_MODEL, config.PATCH_EFFORT, modelTimeoutMs) : null;
+  if (!apiKey) console.warn("[worker] ANTHROPIC_API_KEY is not set; planning and patch generation will fail");
+  const runs = new RunRecorder(prisma);
 
   const analyze = createAnalyzeStage({
     prisma,
@@ -48,14 +52,31 @@ async function main(): Promise<void> {
   const plan = createPlanStage({
     prisma,
     model: planModel,
-    runs: new RunRecorder(prisma),
+    runs,
     maxAttempts: config.PLANNING_MAX_ATTEMPTS,
     taskTokenBudget: config.TASK_TOKEN_BUDGET,
     maxOutputTokens: config.PLANNING_MAX_OUTPUT_TOKENS,
   });
+  const patch = createPatchStage({
+    prisma,
+    model: patchModel,
+    runs,
+    workspaces,
+    github,
+    maxAttempts: config.PATCH_MAX_ATTEMPTS,
+    taskTokenBudget: config.TASK_TOKEN_BUDGET,
+    maxOutputTokens: config.PATCH_MAX_OUTPUT_TOKENS,
+    gitTimeoutMs: config.GIT_TIMEOUT_SECONDS * 1000,
+    limits: {
+      ...DEFAULT_PATCH_LIMITS,
+      maxFileBytes: config.PATCH_MAX_FILE_KB * 1024,
+      maxChangedLines: config.PATCH_MAX_CHANGED_LINES,
+    },
+    author: { name: config.PATCH_AUTHOR_NAME, email: config.PATCH_AUTHOR_EMAIL },
+  });
 
-  // A workspace older than any analysis could take was left by a crashed worker.
-  const swept = await workspaces.sweep(2 * config.ANALYZE_TIMEOUT_SECONDS * 1000);
+  // A workspace older than any stage that uses one could take was left by a crashed worker.
+  const swept = await workspaces.sweep(2 * Math.max(config.ANALYZE_TIMEOUT_SECONDS, config.PATCH_TIMEOUT_SECONDS) * 1000);
   if (swept > 0) console.log(`[worker] removed ${swept} stale workspace(s)`);
 
   const loadStatus = async (id: string) => (await prisma.agentTask.findUniqueOrThrow({ where: { id } })).status;
@@ -72,14 +93,16 @@ async function main(): Promise<void> {
           taskId,
           {
             stages: {
-              // Week 5+: GENERATING_PATCH, RUNNING_CHECKS, REPAIRING, OPENING_PR
+              // Week 6+: RUNNING_CHECKS, REPAIRING, OPENING_PR
               [TaskStatus.QUEUED]: async () => TaskStatus.ANALYZING,
               [TaskStatus.ANALYZING]: analyze,
               [TaskStatus.PLANNING]: plan,
+              [TaskStatus.GENERATING_PATCH]: patch,
             },
             stageTimeoutsMs: {
               [TaskStatus.ANALYZING]: config.ANALYZE_TIMEOUT_SECONDS * 1000,
               [TaskStatus.PLANNING]: config.PLAN_TIMEOUT_SECONDS * 1000,
+              [TaskStatus.GENERATING_PATCH]: config.PATCH_TIMEOUT_SECONDS * 1000,
             },
             loadStatus,
             transition: (id, from, to) => store.transition(id, from, to),
