@@ -71,9 +71,16 @@ export function githubRemoteUrl(owner: string, name: string): string {
   return `https://github.com/${owner}/${name}.git`;
 }
 
-function runGit(command: string, args: string[], env: NodeJS.ProcessEnv, timeoutMs: number, signal?: AbortSignal): Promise<string> {
+export function runGit(
+  command: string,
+  args: string[],
+  env: NodeJS.ProcessEnv,
+  timeoutMs: number,
+  signal?: AbortSignal,
+  maxBuffer = 1024 * 1024,
+): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile("git", args, { env, timeout: timeoutMs, signal, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+    execFile("git", args, { env, timeout: timeoutMs, signal, maxBuffer }, (err, stdout, stderr) => {
       if (err) {
         const detail = String(stderr).trim().slice(0, 500);
         reject(new GitError(`git ${command} failed: ${detail || err.message}`));
