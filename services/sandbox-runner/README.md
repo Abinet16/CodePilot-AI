@@ -1,12 +1,28 @@
-# sandbox-runner (week 6)
+# sandbox-runner
 
-Executes **human-configured command profiles** against a patched workspace in a disposable container and returns bounded, sanitized results.
+Runs **maintainer-configured command profiles** against a rebuilt patch workspace in a disposable container and returns bounded results. The worker calls it in-process (`DockerSandbox`). The model never chooses a command; it only reads the results.
 
-Planned contract:
+Build the image once:
 
-- Input: workspace snapshot (tarball or read-only mount of a copy), a validated `CommandProfile` from `@codepilot/agent-core`.
-- Container: non-root user, read-only base image, `--network none` by default (dependency install uses a separate, allowlisted-registry step), CPU/memory/pids limits, disk quota, wall-clock timeout.
-- Never mounted: the Docker socket, host credentials, `DATABASE_URL`, GitHub tokens, LLM keys.
-- Output: exit code, duration, truncated and secret-scrubbed stdout/stderr summary, full log uploaded to object storage.
+```bash
+pnpm sandbox:build      # docker build -t codepilot/sandbox-node:22 services/sandbox-runner
+```
 
-The directory layout is not a security boundary. For public multi-user deployment this runs on a hardened runtime (gVisor/Firecracker) or an isolated worker pool.
+Every command runs in a fresh container with:
+
+- `--network none`, except the install step, which runs with network access but with lifecycle scripts disabled (`--ignore-scripts` / `--mode=skip-build`, enforced by `agent-core`'s install policy);
+- a read-only root filesystem; only `/workspace` (the checkout), `/cache` (package manager caches for this verification), and a size-limited `/tmp` are writable;
+- a non-root user, `--cap-drop ALL`, `no-new-privileges`, and `--init`;
+- memory without swap, CPU, process-count, and open-file limits, plus a wall-clock timeout (`docker kill` on expiry or cancellation);
+- an environment built from scratch: nothing from the worker (no `DATABASE_URL`, GitHub tokens, or model keys) reaches the container;
+- labeled containers, removed after every run and swept at worker startup.
+
+Output is kept in bounded memory (head and tail), then stripped of terminal escapes and secret-shaped strings by `agent-core` before it is stored or shown to the model.
+
+## Limits of this isolation
+
+A standard container shares the host kernel and is **not a complete security boundary** for hostile code. The worker needs access to the Docker daemon, which is root-equivalent on that host, so the worker and its Docker host must not hold anything else. For a public multi-user deployment, run checks on a hardened runtime (gVisor `runsc`, Kata, or Firecracker) or on a dedicated, isolated worker pool. Disk use inside `/workspace` is not quota-limited by Docker's default storage driver; the workspace is deleted after each verification.
+
+## Tests
+
+`pnpm test` covers the container arguments. `pnpm test:integration` runs real containers and is skipped when the image is not present.
