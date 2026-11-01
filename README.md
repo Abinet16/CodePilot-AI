@@ -15,7 +15,7 @@ issue → analyze repo (pinned SHA) → structured plan → [human approves] →
 | Week 2 | GitHub sign-in, GitHub App, webhooks, repository access, audit log | ✅ done |
 | `v0.1` | Secure GitHub connection and repository analysis (week 3: tasks, pinned commits, indexing, context retrieval) | ✅ done |
 | `v0.2` | Structured plans and patch generation (week 4: Claude-generated plans, human plan review, runs and usage, timeouts, retries, cancellation; week 5: plan-bound patches committed on a task branch, versioned with their diff) | ✅ done |
-| `v0.3` | Sandboxed tests and bounded repair loop | ⏳ week 6 |
+| `v0.3` | Sandboxed tests and bounded repair loop (week 6: maintainer-configured checks in isolated containers, per-patch results, bounded repairs) | ✅ done |
 | `v0.4` | Automated draft pull requests | ⏳ week 7 |
 | `v1.0` | Deployed, evaluated, documented product | ⏳ weeks 8–10 |
 
@@ -29,7 +29,7 @@ packages/contracts     Task statuses + transitions, plan schema, queue payloads 
 packages/agent-core    Safety policies, analysis (filtering, project detection, symbols, chunking, context budgets), planning (prompt, output schema, plan validation, pricing), patching (prompt, output schema, edits, plan conformance, limits), branch policy
 packages/github        GitHub App auth and installation-scoped REST calls (API + worker)
 packages/config        Shared tsconfig and Jest preset
-services/sandbox-runner  Isolated execution of configured check commands (week 6)
+services/sandbox-runner  Isolated, resource-limited Docker execution of configured check commands
 prisma/                Schema and migrations
 docs/                  Architecture, data model, threat model, ADRs
 ```
@@ -50,7 +50,9 @@ Check `http://localhost:4000/api/health`, or open `http://localhost:3000` to see
 
 With a repository enabled, start a task at `/tasks/new`. The worker pins the default branch's head commit, indexes it, and asks Claude for a structured implementation plan grounded in the code it found. The task page shows the plan, the files it touches and why, and the tokens and estimated cost of each model call. Approve the plan, or request changes and get a revised version (up to 3). Once approved, the worker implements the plan in a disposable checkout of the pinned commit, commits it on a `codepilot/…` branch, and the task page shows the commit, the files changed, and the diff.
 
-Planning and patch generation need `ANTHROPIC_API_KEY` in `.env`; without it, tasks fail at `PLANNING` with a clear reason. Checks run in week 6, so a task with a patch currently stops with `No stage handler is implemented for RUNNING_CHECKS yet`; the patch stays stored and visible. Nothing is pushed to GitHub yet.
+Before tasks can be verified, build the sandbox image once (`pnpm sandbox:build`) and have a maintainer set the repository's checks under **Repositories → Checks** (detected suggestions are offered). After a patch, the worker rebuilds it in a fresh checkout, runs the install step and each check in isolated containers, and shows the results per patch version. Failing checks go back to the model for up to `MAX_REPAIR_ATTEMPTS` repairs within the approved plan. A task whose checks pass stops at `READY_FOR_REVIEW`; opening the draft pull request arrives in week 7, and nothing is pushed to GitHub yet.
+
+Planning, patching, and repairs need `ANTHROPIC_API_KEY` in `.env`; checks need Docker. Without them, tasks fail at the corresponding stage with a clear reason.
 
 To sign in and connect repositories, create a GitHub App first: see [docs/api/github-app-setup.md](docs/api/github-app-setup.md). Without one, GitHub routes return `503` in development. Endpoints are listed in [docs/api/endpoints.md](docs/api/endpoints.md).
 
