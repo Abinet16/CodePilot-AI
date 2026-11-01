@@ -73,6 +73,21 @@ describe("buildPatchPrompt", () => {
     expect(prompt).toMatch(/could not be applied:\n- src\/pagination.ts edit 1/);
   });
 
+  it("adds fenced check failures and says the previous patch is applied when repairing", () => {
+    const prompt = buildPatchPrompt({
+      ...base,
+      repair: {
+        patchVersion: 1,
+        attempt: 1,
+        maxAttempts: 2,
+        failures: [{ profileId: "test", command: "pnpm run test", status: "FAILED", exitCode: 1, output: "expected 3, received 2" }],
+      },
+    });
+    expect(prompt).toContain("Patch version 1 failed its checks. This is repair 1 of at most 2.");
+    expect(prompt).toContain('Check "test" (pnpm run test): failed, exit code 1\n<untrusted-n0nce123 source="check-test">\nexpected 3, received 2\n</untrusted-n0nce123>');
+    expect(prompt).toContain("planned files that exist with patch version 1 applied");
+  });
+
   it("rejects a weak nonce", () => {
     expect(() => buildPatchPrompt({ ...base, nonce: "x" })).toThrow(/nonce/);
   });
