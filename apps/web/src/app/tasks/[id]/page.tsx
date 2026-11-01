@@ -5,6 +5,7 @@ import { apiGet } from "@/lib/api";
 import { StatusBadge } from "../status-badge";
 import { AutoRefresh } from "./auto-refresh";
 import { CancelButton } from "./cancel-button";
+import { ChecksView } from "./checks-view";
 import { DiffView } from "./diff-view";
 import { PlanReview } from "./plan-review";
 import { PatchView } from "./patch-view";
@@ -98,6 +99,31 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
               <PatchView patch={p} />
             </details>
           ))}
+        </section>
+      )}
+      {(task.checks.length > 0 || task.status === "RUNNING_CHECKS") && (
+        <section className="card">
+          <h2>Checks</h2>
+          {task.status === "RUNNING_CHECKS" && task.checks.at(-1)?.status !== "RUNNING" && <p className="muted">Starting the sandbox…</p>}
+          {task.status === "REPAIRING" && <p className="muted">Checks failed; the agent is repairing the patch…</p>}
+          {task.status === "READY_FOR_REVIEW" && (
+            <p className="notice small">
+              Checks passed on patch v{currentPatch?.version}. Passing checks are evidence, not proof: review the diff. Opening a draft pull request
+              arrives in week 7.
+            </p>
+          )}
+          {[...task.checks].reverse().map((run, i) =>
+            i === 0 ? (
+              <ChecksView key={run.id} run={run} />
+            ) : (
+              <details key={run.id} className="snippet">
+                <summary>
+                  Patch v{run.patchVersion ?? "?"} · {run.status.toLowerCase().replace("_", " ")}
+                </summary>
+                <ChecksView run={run} />
+              </details>
+            ),
+          )}
         </section>
       )}
       {!currentPatch && task.status === "GENERATING_PATCH" && (
