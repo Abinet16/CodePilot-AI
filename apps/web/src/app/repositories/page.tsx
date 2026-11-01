@@ -57,6 +57,11 @@ export default async function RepositoriesPage() {
                       New task
                     </Link>
                   )}
+                  {repo.enabled && (
+                    <Link className="small task-link" href={`/repositories/${repo.id}/checks`}>
+                      Checks
+                    </Link>
+                  )}
                 </td>
               </tr>
             ))}
