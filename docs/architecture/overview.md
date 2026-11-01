@@ -106,4 +106,27 @@ approved plan + pinned commit
 - A patch stored before a crash is reused for the same approved plan.
 - Planned files the patch left alone are recorded and shown to the reviewer.
 
-See [state-machine.md](./state-machine.md), [data-model.md](./data-model.md), [ADR 0004](../decisions/0004-repository-analysis-and-retrieval.md), [ADR 0005](../decisions/0005-structured-planning-and-orchestration.md), and [ADR 0006](../decisions/0006-patch-generation-and-git-workflow.md).
+## Checks and repair (RUNNING_CHECKS ⇄ REPAIRING → READY_FOR_REVIEW)
+
+```
+latest patch (version n)
+→ workspace: fetch base_sha, apply stored diff, tree must equal patches.tree_sha
+→ repository_settings: install + checks (maintainer-configured, policy re-validated)
+→ sandbox (one container per command, see services/sandbox-runner):
+     install: network on, --ignore-scripts      checks: --network none
+     non-root · read-only root · cap-drop ALL · memory/CPU/pids/time limits · empty environment
+→ test_runs (verification of patch n) + test_results (per command: status, exit code, bounded, masked output)
+→ decideAfterChecks
+   ├─ all pass          → patch VERIFIED → READY_FOR_REVIEW (human gate)
+   ├─ some fail         → patch REJECTED → REPAIRING (while repairs < MAX_REPAIR_ATTEMPTS) else FAILED
+   ├─ timeout           → FAILED (safety boundary)
+   └─ could not complete→ FAILED (install, missing executable, memory limit, tree mismatch, no sandbox)
+
+REPAIRING: rebuild patch n as a commit on the task branch → failing output (fenced) + patched files
+→ model edits within planForRepair(plan) → patch n+1, diff cumulative from base_sha → RUNNING_CHECKS
+```
+
+- The worker drives Docker through its CLI. It never mounts the Docker socket, credentials, or its own environment into a container.
+- A verification that finished is never re-run after a crash; one left `RUNNING` is marked `ERRORED` and run again.
+
+See [state-machine.md](./state-machine.md), [data-model.md](./data-model.md), [ADR 0004](../decisions/0004-repository-analysis-and-retrieval.md), [ADR 0005](../decisions/0005-structured-planning-and-orchestration.md), [ADR 0006](../decisions/0006-patch-generation-and-git-workflow.md), and [ADR 0007](../decisions/0007-sandboxed-checks-and-bounded-repair.md).

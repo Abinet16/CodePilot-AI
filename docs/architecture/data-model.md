@@ -1,6 +1,6 @@
 # Data model
 
-Schema: `prisma/schema.prisma`. Migrations: `prisma/migrations/` (`init`, `auth_and_repository_access`, `repository_analysis`, `planning_and_runs`, `patch_attempts`).
+Schema: `prisma/schema.prisma`. Migrations: `prisma/migrations/` (`init`, `auth_and_repository_access`, `repository_analysis`, `planning_and_runs`, `patch_attempts`, `sandbox_checks`).
 
 ```mermaid
 erDiagram
@@ -52,7 +52,9 @@ erDiagram
 | `webhook_deliveries.delivery_id` primary key | GitHub's `X-GitHub-Delivery` dedupes redelivered webhooks |
 
 - `agent_tasks.base_sha` and `patches.base_sha` record exactly which commit was analyzed and patched.
-- `test_results.output_summary` is bounded and sanitized; full logs go to object storage via `log_object_key`.
+- `repository_settings` holds the maintainer-configured `install_command` (nullable) and ordered `checks` (`CheckProfile[]`), with `updated_by` and `updated_at`. Both are validated by the command policy before save and again before every run.
+- `test_runs` is one verification of one patch version (`patch_id`), with the sandbox image, a status (`PASSED`, `FAILED`, `ERRORED`, `TIMED_OUT`), and an `error` when it could not complete. `test_results` has one row per command (`position`, `profile_id`, `kind`, `command`, `status`, `exit_code`, `duration_ms`); `(test_run_id, position)` is unique.
+- `test_results.output_summary` is bounded, stripped of terminal escapes, and secret-masked (`output_truncated` says when it was cut); full logs will go to object storage via `log_object_key`.
 - No credential or token column exists anywhere. Session tokens are stored only as SHA-256 hashes; GitHub user tokens are never stored; installation tokens are minted on demand and held in memory only.
 - Repositories leaving an installation are soft-removed (`removed_at`) and disabled, so task history is preserved.
 - `repository_snapshots`, `repository_files`, `code_chunks`, and `code_symbols` are **derived, versioned** data keyed by commit, safe to drop and rebuild. A snapshot and all its rows are written in one transaction; only the newest `SNAPSHOTS_TO_KEEP` per repository are kept.

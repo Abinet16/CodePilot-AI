@@ -18,7 +18,7 @@ stateDiagram-v2
   READY_FOR_REVIEW --> OPENING_PR: human approves
   OPENING_PR --> PR_OPENED
   PR_OPENED --> [*]
-  note right of REPAIRING: bounded by MAX_REPAIR_ATTEMPTS (default 2)
+  note right of REPAIRING: bounded by MAX_REPAIR_ATTEMPTS (default 2) per approved plan
 ```
 
 Every non-terminal state may also move to `FAILED` or `CANCELLED`. Terminal states: `PR_OPENED`, `FAILED`, `CANCELLED`.
@@ -33,3 +33,4 @@ Every non-terminal state may also move to `FAILED` or `CANCELLED`. Terminal stat
 6. **Failures are classified.** Transient failures (rate limits, provider outages, dropped connections) leave the status unchanged and are retried by the queue with backoff. Everything else, including a stage timeout, a declined task, or an exhausted token budget, moves the task to `FAILED` with a reason.
 7. **Cancellation wins.** `CANCELLED` is set by the API. A running job notices, aborts its in-flight work, and exits without writing a status.
 8. **Patches implement the approved plan, nothing more.** `GENERATING_PATCH` only touches files the approved plan lists, with the change kind it states, and commits on the task's own `codepilot/…` branch. Every attempt is stored as a new patch version; none is overwritten.
+9. **Checks verify the stored patch, in a sandbox.** `RUNNING_CHECKS` rebuilds the latest patch from its diff, refuses to run unless the tree matches the stored tree SHA, and runs only the maintainer-configured checks. Passing checks verify the patch (`READY_FOR_REVIEW`); failing checks reject it and move to `REPAIRING` while repairs for the plan remain; a timeout fails the task as a safety violation; a run that could not complete fails the task without judging the patch.
