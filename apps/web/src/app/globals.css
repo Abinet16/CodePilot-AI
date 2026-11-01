@@ -230,6 +230,7 @@ h2 {
   font-size: 14px;
 }
 
+.form input:not([type="checkbox"]),
 .form select,
 .form textarea {
   font: inherit;
@@ -343,4 +344,27 @@ h2 {
 .diff-del {
   color: var(--bad);
   background: color-mix(in srgb, var(--bad) 10%, transparent);
+}
+
+.form label.inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.check-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.check-row input:not([type="number"]),
+.check-row select {
+  flex: 1 1 140px;
+  width: auto;
+}
+
+.check-row input[type="number"] {
+  width: 72px;
 }
