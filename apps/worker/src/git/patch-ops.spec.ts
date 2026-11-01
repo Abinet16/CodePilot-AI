@@ -5,7 +5,7 @@ import path from "node:path";
 import { createFixtureRepo } from "../../test/git-fixture";
 import { fetchCommit } from "./git";
 import type { LocalRepo } from "./patch-ops";
-import { applyDiff, commitPaths, createBranch, diffFromBase, resetTo, trackedModes } from "./patch-ops";
+import { applyDiff, commitPaths, commitStaged, createBranch, diffFromBase, resetTo, trackedModes } from "./patch-ops";
 
 const identity = { name: "CodePilot AI", email: "codepilot@invalid" };
 
@@ -64,6 +64,11 @@ describe("patch git operations", () => {
     const diffFile = path.join(work, "patch.diff");
     writeFileSync(diffFile, diff);
     expect(await applyDiff(fresh, diffFile)).toBe(treeSha);
+
+    // Committing the rebuilt index reproduces the tree on top of the base.
+    const rebuilt = await commitStaged(fresh, "Fix pagination", identity);
+    expect(show(fresh, "rev-parse", `${rebuilt}^{tree}`).trim()).toBe(treeSha);
+    expect(show(fresh, "rev-parse", `${rebuilt}^`).trim()).toBe(fixture.commitSha);
   });
 
   it("refuses to commit changes outside the validated paths", async () => {

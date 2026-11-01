@@ -65,15 +65,20 @@ export async function commitPaths(
   if (stray.length > 0) throw new GitError(`Unexpected changes outside the patch: ${stray.slice(0, 5).join(", ")}`);
   if (changed.length === 0) throw new GitError("The patch produced no changes to commit");
 
+  const commitSha = await commitStaged(repo, message, identity);
+  const treeSha = (await git(repo, "rev-parse", ["HEAD^{tree}"])).trim();
+  return { commitSha, treeSha };
+}
+
+/** Commits whatever is staged, e.g. a stored diff applied with `applyDiff`. */
+export async function commitStaged(repo: LocalRepo, message: string, identity: CommitIdentity): Promise<string> {
   await git(repo, "commit", ["--quiet", "--no-verify", "--cleanup=verbatim", "-m", message], {
     GIT_AUTHOR_NAME: identity.name,
     GIT_AUTHOR_EMAIL: identity.email,
     GIT_COMMITTER_NAME: identity.name,
     GIT_COMMITTER_EMAIL: identity.email,
   });
-  const commitSha = (await git(repo, "rev-parse", ["HEAD"])).trim();
-  const treeSha = (await git(repo, "rev-parse", ["HEAD^{tree}"])).trim();
-  return { commitSha, treeSha };
+  return (await git(repo, "rev-parse", ["HEAD"])).trim();
 }
 
 export interface CommittedDiff {
