@@ -3,12 +3,14 @@ import type {
   AgentRunSummary,
   ContextPackage,
   CreateTaskRequest,
+  CheckResultSummary,
   ImplementationPlan,
   PatchDetail,
   PatchFileStat,
   PatchSummary,
   RepositoryPermission,
   TaskDetail,
+  TestRunSummary,
   TaskJobKey,
   TaskSummary,
   UsageTotals,
@@ -22,7 +24,18 @@ import {
   hasPermission,
   isTerminal,
 } from "@codepilot/contracts";
-import type { AgentRun, AgentTask, ImplementationPlan as PlanRow, Issue, Patch, Prisma, Repository, TaskEvent } from "@prisma/client";
+import type {
+  AgentRun,
+  AgentTask,
+  ImplementationPlan as PlanRow,
+  Issue,
+  Patch,
+  Prisma,
+  Repository,
+  TaskEvent,
+  TestResult,
+  TestRun,
+} from "@prisma/client";
 import { AuditService } from "../audit/audit.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { TaskQueue } from "./task-queue";
@@ -58,7 +71,32 @@ type DetailRow = TaskRow & {
   runs: AgentRun[];
   plans: Array<PlanRow & { reviewedBy: { githubLogin: string } | null }>;
   patches: PatchRow[];
+  testRuns: TestRunRow[];
 };
+
+type TestRunRow = TestRun & { results: TestResult[]; patch: { version: number } | null };
+
+function toTestRunSummary(run: TestRunRow): TestRunSummary {
+  return {
+    id: run.id,
+    patchVersion: run.patch?.version ?? null,
+    status: run.status,
+    runnerImage: run.runnerImage,
+    error: run.error,
+    results: run.results.map((r) => ({
+      profileId: r.profileId,
+      kind: r.kind as CheckResultSummary["kind"],
+      command: r.command,
+      status: r.status,
+      exitCode: r.exitCode,
+      durationMs: r.durationMs,
+      output: r.outputSummary,
+      outputTruncated: r.outputTruncated,
+    })),
+    startedAt: run.startedAt?.toISOString() ?? null,
+    completedAt: run.completedAt?.toISOString() ?? null,
+  };
+}
 
 function toPatchSummary(p: PatchRow): PatchSummary {
   return {
@@ -122,6 +160,7 @@ function toDetail(task: DetailRow, usage: UsageTotals): TaskDetail {
       };
     }),
     patches: task.patches.map(toPatchSummary),
+    checks: task.testRuns.map(toTestRunSummary),
     runs: task.runs.map(toRunSummary),
     usage,
     events: task.events.map((e) => ({
@@ -143,6 +182,7 @@ const detailInclude = {
   plans: { orderBy: { version: "asc" }, include: { reviewedBy: { select: { githubLogin: true } } } },
   // Diffs can be large, so the detail leaves them out; they are fetched one version at a time.
   patches: { orderBy: { version: "asc" }, omit: { patchContent: true }, include: { plan: { select: { version: true } } } },
+  testRuns: { orderBy: { startedAt: "asc" }, include: { results: { orderBy: { position: "asc" } }, patch: { select: { version: true } } } },
 } satisfies Prisma.AgentTaskInclude;
 
 /**

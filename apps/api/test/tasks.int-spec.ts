@@ -376,7 +376,43 @@ describe("tasks API (PostgreSQL)", () => {
       },
     });
 
+    const stored = await prisma.patch.findFirstOrThrow({ where: { taskId: id } });
+    await prisma.testRun.create({
+      data: {
+        taskId: id,
+        patchId: stored.id,
+        runnerImage: "codepilot/sandbox-node:22",
+        status: "FAILED",
+        startedAt: new Date(),
+        completedAt: new Date(),
+        results: {
+          create: [
+            { position: 0, profileId: "test", kind: "test", command: "pnpm run test", status: "FAILED", exitCode: 1, outputSummary: "expected 4, received 3", durationMs: 1200 },
+          ],
+        },
+      },
+    });
+
     const detail = (await bob.get(`/api/tasks/${id}`).expect(200)).body as TaskDetail;
+    expect(detail.checks).toEqual([
+      expect.objectContaining({
+        patchVersion: 1,
+        status: "FAILED",
+        runnerImage: "codepilot/sandbox-node:22",
+        results: [
+          {
+            profileId: "test",
+            kind: "test",
+            command: "pnpm run test",
+            status: "FAILED",
+            exitCode: 1,
+            durationMs: 1200,
+            output: "expected 4, received 3",
+            outputTruncated: false,
+          },
+        ],
+      }),
+    ]);
     expect(detail.patches).toEqual([
       expect.objectContaining({ version: 1, status: "PROPOSED", planVersion: 1, commitSha: "c".repeat(40), files, additions: 1, deletions: 1 }),
     ]);
