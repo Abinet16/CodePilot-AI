@@ -104,6 +104,7 @@ model User {
   auditLogs        AuditLog[]
   usageRecords     UsageRecord[]
   reviewedPlans    ImplementationPlan[]
+  checkSettings    RepositorySettings[]
 
   @@map("users")
 }
@@ -180,15 +181,19 @@ model RepositoryAccess {
 }
 
 model RepositorySettings {
-  id              String @id @default(uuid()) @db.Uuid
-  repositoryId    String @unique @map("repository_id") @db.Uuid
-  /// CommandProfile[] validated by @codepilot/agent-core before save.
-  allowedCommands Json   @default("[]") @map("allowed_commands")
-  /// Ordered command profile ids executed during RUNNING_CHECKS.
-  testCommands    Json   @default("[]") @map("test_commands")
-  policyConfig    Json   @default("{}") @map("policy_config")
+  id             String    @id @default(uuid()) @db.Uuid
+  repositoryId   String    @unique @map("repository_id") @db.Uuid
+  /// CommandProfile from @codepilot/contracts, or null when the project needs no install.
+  /// Runs with the network on and lifecycle scripts off.
+  installCommand Json?     @map("install_command")
+  /// CheckProfile[] run in order with the network off. Validated by agent-core before save and before every run.
+  checks         Json      @default("[]")
+  policyConfig   Json      @default("{}") @map("policy_config")
+  updatedById    String?   @map("updated_by") @db.Uuid
+  updatedAt      DateTime? @map("updated_at")
 
   repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  updatedBy  User?      @relation(fields: [updatedById], references: [id], onDelete: SetNull)
 
   @@map("repository_settings")
 }
@@ -414,6 +419,7 @@ model Patch {
   @@map("patches")
 }
 
+/// One verification of a patch in the sandbox: an optional install, then each configured check.
 model TestRun {
   id          String        @id @default(uuid()) @db.Uuid
   taskId      String        @map("task_id") @db.Uuid
@@ -421,6 +427,8 @@ model TestRun {
   runnerImage String        @map("runner_image")
   status      TestRunStatus @default(QUEUED)
   exitCode    Int?          @map("exit_code")
+  /// Why the run could not complete (sandbox unavailable, install failed, rebuilt tree mismatch).
+  error       String?
   startedAt   DateTime?     @map("started_at")
   completedAt DateTime?     @map("completed_at")
 
@@ -429,21 +437,30 @@ model TestRun {
   results TestResult[]
 
   @@index([taskId])
+  @@index([patchId])
   @@map("test_runs")
 }
 
 model TestResult {
-  id            String  @id @default(uuid()) @db.Uuid
-  testRunId     String  @map("test_run_id") @db.Uuid
-  command       String
-  exitCode      Int?    @map("exit_code")
+  id              String        @id @default(uuid()) @db.Uuid
+  testRunId       String        @map("test_run_id") @db.Uuid
+  /// Order within the run; the install step, when configured, is 0.
+  position        Int
+  profileId       String        @map("profile_id")
+  /// "install" or a CheckKind from @codepilot/contracts.
+  kind            String
+  command         String
+  status          TestRunStatus
+  exitCode        Int?          @map("exit_code")
   /// Bounded, sanitized summary. Full logs live in object storage.
-  outputSummary String  @map("output_summary")
-  logObjectKey  String? @map("log_object_key")
-  durationMs    Int     @map("duration_ms")
+  outputSummary   String        @map("output_summary")
+  outputTruncated Boolean       @default(false) @map("output_truncated")
+  logObjectKey    String?       @map("log_object_key")
+  durationMs      Int           @map("duration_ms")
 
   testRun TestRun @relation(fields: [testRunId], references: [id], onDelete: Cascade)
 
+  @@unique([testRunId, position])
   @@map("test_results")
 }
 
