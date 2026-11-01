@@ -3,10 +3,12 @@ import { DEFAULT_PATCH_LIMITS } from "@codepilot/agent-core";
 import { JOBS, QUEUES, TaskStatus } from "@codepilot/contracts";
 import type { RunTaskJob } from "@codepilot/contracts";
 import { GitHubAppClient } from "@codepilot/github";
+import { DockerSandbox } from "@codepilot/sandbox-runner";
 import { PrismaClient } from "@prisma/client";
 import { Worker } from "bullmq";
 import Redis from "ioredis";
 import { createAnalyzeStage } from "./analysis/analyze-stage";
+import { createChecksStage } from "./checks/checks-stage";
 import { ContextRetriever } from "./analysis/retriever";
 import { SnapshotStore } from "./analysis/snapshot-store";
 import { WorkspaceManager } from "./analysis/workspace";
@@ -15,6 +17,7 @@ import { loadConfig } from "./config";
 import { runPipeline } from "./pipeline";
 import { AnthropicModel } from "./model/anthropic-model";
 import { createPatchStage } from "./patching/patch-stage";
+import { createRepairStage } from "./patching/repair-stage";
 import { createPlanStage } from "./planning/plan-stage";
 import { RunRecorder } from "./runs";
 import { StaleTransitionError, TaskStateStore } from "./task-state";
@@ -57,7 +60,7 @@ async function main(): Promise<void> {
     taskTokenBudget: config.TASK_TOKEN_BUDGET,
     maxOutputTokens: config.PLANNING_MAX_OUTPUT_TOKENS,
   });
-  const patch = createPatchStage({
+  const patchDeps = {
     prisma,
     model: patchModel,
     runs,
@@ -73,11 +76,34 @@ async function main(): Promise<void> {
       maxChangedLines: config.PATCH_MAX_CHANGED_LINES,
     },
     author: { name: config.PATCH_AUTHOR_NAME, email: config.PATCH_AUTHOR_EMAIL },
+  };
+  const patch = createPatchStage(patchDeps);
+  const repair = createRepairStage({ ...patchDeps, maxRepairs: config.MAX_REPAIR_ATTEMPTS });
+
+  const sandbox = config.SANDBOX_ENABLED ? new DockerSandbox() : null;
+  if (!sandbox) console.warn("[worker] SANDBOX_ENABLED=false; checks will fail");
+  else if (!(await sandbox.ready(config.SANDBOX_IMAGE))) {
+    console.warn(`[worker] sandbox image ${config.SANDBOX_IMAGE} is not available; run pnpm sandbox:build, or checks will fail`);
+  }
+  const checks = createChecksStage({
+    prisma,
+    sandbox,
+    workspaces,
+    github,
+    gitTimeoutMs: config.GIT_TIMEOUT_SECONDS * 1000,
+    image: config.SANDBOX_IMAGE,
+    limits: { memoryMb: config.SANDBOX_MEMORY_MB, cpus: config.SANDBOX_CPUS, pids: config.SANDBOX_PIDS, tmpfsMb: config.SANDBOX_TMPFS_MB },
+    maxOutputBytes: config.CHECK_OUTPUT_KB * 1024,
+    outputChars: config.CHECK_OUTPUT_CHARS,
+    maxRepairs: config.MAX_REPAIR_ATTEMPTS,
   });
 
   // A workspace older than any stage that uses one could take was left by a crashed worker.
-  const swept = await workspaces.sweep(2 * Math.max(config.ANALYZE_TIMEOUT_SECONDS, config.PATCH_TIMEOUT_SECONDS) * 1000);
+  const longestStageMs = 1000 * Math.max(config.ANALYZE_TIMEOUT_SECONDS, config.PATCH_TIMEOUT_SECONDS, config.CHECKS_TIMEOUT_SECONDS, config.REPAIR_TIMEOUT_SECONDS);
+  const swept = await workspaces.sweep(2 * longestStageMs);
   if (swept > 0) console.log(`[worker] removed ${swept} stale workspace(s)`);
+  const sweptContainers = (await sandbox?.sweep(2 * longestStageMs)) ?? 0;
+  if (sweptContainers > 0) console.log(`[worker] removed ${sweptContainers} stale sandbox container(s)`);
 
   const loadStatus = async (id: string) => (await prisma.agentTask.findUniqueOrThrow({ where: { id } })).status;
 
@@ -93,16 +119,20 @@ async function main(): Promise<void> {
           taskId,
           {
             stages: {
-              // Week 6+: RUNNING_CHECKS, REPAIRING, OPENING_PR
+              // Week 7: OPENING_PR
               [TaskStatus.QUEUED]: async () => TaskStatus.ANALYZING,
               [TaskStatus.ANALYZING]: analyze,
               [TaskStatus.PLANNING]: plan,
               [TaskStatus.GENERATING_PATCH]: patch,
+              [TaskStatus.RUNNING_CHECKS]: checks,
+              [TaskStatus.REPAIRING]: repair,
             },
             stageTimeoutsMs: {
               [TaskStatus.ANALYZING]: config.ANALYZE_TIMEOUT_SECONDS * 1000,
               [TaskStatus.PLANNING]: config.PLAN_TIMEOUT_SECONDS * 1000,
               [TaskStatus.GENERATING_PATCH]: config.PATCH_TIMEOUT_SECONDS * 1000,
+              [TaskStatus.RUNNING_CHECKS]: config.CHECKS_TIMEOUT_SECONDS * 1000,
+              [TaskStatus.REPAIRING]: config.REPAIR_TIMEOUT_SECONDS * 1000,
             },
             loadStatus,
             transition: (id, from, to) => store.transition(id, from, to),
