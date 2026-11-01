@@ -1,5 +1,13 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, UseGuards } from "@nestjs/common";
-import { IssueSummary, RepositorySummary, UpdateRepositoryRequest, UpdateRepositoryRequestSchema } from "@codepilot/contracts";
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Put, UseGuards } from "@nestjs/common";
+import {
+  IssueSummary,
+  RepositoryChecks,
+  RepositoryChecksResponse,
+  RepositoryChecksSchema,
+  RepositorySummary,
+  UpdateRepositoryRequest,
+  UpdateRepositoryRequestSchema,
+} from "@codepilot/contracts";
 import { AuthUser, CurrentUser, SessionGuard } from "../auth/session.guard";
 import { ZodBodyPipe } from "../common/zod-body.pipe";
 import { RepositoriesService } from "./repositories.service";
@@ -17,6 +25,20 @@ export class RepositoriesController {
   @Get(":id/issues")
   issues(@CurrentUser() user: AuthUser, @Param("id", new ParseUUIDPipe()) id: string): Promise<IssueSummary[]> {
     return this.repositories.listOpenIssues(user.id, id);
+  }
+
+  @Get(":id/checks")
+  checks(@CurrentUser() user: AuthUser, @Param("id", new ParseUUIDPipe()) id: string): Promise<RepositoryChecksResponse> {
+    return this.repositories.getChecks(user.id, id);
+  }
+
+  @Put(":id/checks")
+  setChecks(
+    @CurrentUser() user: AuthUser,
+    @Param("id", new ParseUUIDPipe()) id: string,
+    @Body(new ZodBodyPipe(RepositoryChecksSchema)) body: RepositoryChecks,
+  ): Promise<RepositoryChecksResponse> {
+    return this.repositories.setChecks(user.id, id, body);
   }
 
   @Patch(":id")

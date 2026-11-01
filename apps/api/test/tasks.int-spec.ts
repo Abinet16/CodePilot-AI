@@ -1,4 +1,4 @@
-import type { IssueSummary, PatchDetail, RepositorySummary, TaskDetail, TaskJobKey, TaskSummary } from "@codepilot/contracts";
+import type { IssueSummary, PatchDetail, RepositoryChecks, RepositoryChecksResponse, RepositorySummary, TaskDetail, TaskJobKey, TaskSummary } from "@codepilot/contracts";
 import { taskJobId } from "@codepilot/contracts";
 import type { NestExpressApplication } from "@nestjs/platform-express";
 import { Test } from "@nestjs/testing";
@@ -395,6 +395,61 @@ describe("tasks API (PostgreSQL)", () => {
     await prisma.patch.create({ data: { ...copy, taskId: privateTask.id, files: [], patchContent: "secret diff" } });
     await bob.get(`/api/tasks/${privateTask.id}/patches/1`).expect(404);
     await request(app.getHttpServer()).get(`/api/tasks/${id}/patches/1`).expect(401);
+  });
+
+  it("lets maintainers configure checks, suggests them from the latest snapshot, and audits changes", async () => {
+    await prisma.repositorySnapshot.create({
+      data: {
+        repositoryId: shared.id,
+        commitSha: SHA,
+        profile: {
+          languages: { typescript: 2 },
+          primaryLanguage: "typescript",
+          supported: true,
+          packageManager: "pnpm",
+          typescript: true,
+          frameworks: [],
+          testFrameworks: ["Jest"],
+          scripts: { test: "jest", lint: "eslint ." },
+          monorepo: false,
+          instructionFiles: [],
+          testFileCount: 1,
+          directories: { src: 2 },
+        },
+        stats: { indexedFiles: 2, indexedBytes: 100, skipped: {}, truncated: false },
+        paths: ["package.json"],
+      },
+    });
+
+    const viewed = (await bob.get(`/api/repositories/${shared.id}/checks`).expect(200)).body as RepositoryChecksResponse;
+    expect(viewed).toMatchObject({ configured: null, canEdit: false, updatedBy: null });
+    expect(viewed.suggested?.checks.map((c) => c.id)).toEqual(["lint", "test"]);
+    expect(viewed.suggested?.install?.args).toContain("--ignore-scripts");
+
+    const checks: RepositoryChecks = {
+      install: { id: "install", executable: "pnpm", args: ["install", "--frozen-lockfile", "--ignore-scripts"], timeoutMs: 300_000 },
+      checks: [{ id: "test", kind: "test", executable: "pnpm", args: ["run", "test"], timeoutMs: 600_000 }],
+    };
+    await bob.put(`/api/repositories/${shared.id}/checks`).send(checks).expect(403);
+    // WRITE is enough to run tasks, but not to decide what runs in the sandbox.
+    await alice.put(`/api/repositories/${aliceOnly.id}/checks`).send(checks).expect(403);
+
+    const saved = (await alice.put(`/api/repositories/${shared.id}/checks`).send(checks).expect(200)).body as RepositoryChecksResponse;
+    expect(saved).toMatchObject({ configured: checks, canEdit: true, updatedBy: `t-alice-${base}` });
+    expect((await bob.get(`/api/repositories/${shared.id}/checks`).expect(200)).body.configured).toEqual(checks);
+
+    const audit = await prisma.auditLog.findFirstOrThrow({ where: { action: "repository.checks_updated" }, orderBy: { createdAt: "desc" } });
+    expect(audit.metadata).toMatchObject({ install: "pnpm install --frozen-lockfile --ignore-scripts", checks: ["test: pnpm run test"] });
+
+    const withScripts = { ...checks, install: { ...checks.install!, args: ["install"] } };
+    const rejected = await alice.put(`/api/repositories/${shared.id}/checks`).send(withScripts).expect(400);
+    expect(JSON.stringify(rejected.body)).toMatch(/lifecycle scripts/);
+    await alice.put(`/api/repositories/${shared.id}/checks`).send({ ...checks, checks: [{ ...checks.checks[0], executable: "bash" }] }).expect(400);
+    await alice.put(`/api/repositories/${shared.id}/checks`).send({ ...checks, shell: "sh -c x" }).expect(400);
+
+    const withoutInstall = (await alice.put(`/api/repositories/${shared.id}/checks`).send({ ...checks, install: null }).expect(200)).body as RepositoryChecksResponse;
+    expect(withoutInstall.configured?.install).toBeNull();
+    await bob.get(`/api/repositories/${aliceOnly.id}/checks`).expect(404);
   });
 
   it("removes pending resume jobs when a task under review is cancelled", async () => {
