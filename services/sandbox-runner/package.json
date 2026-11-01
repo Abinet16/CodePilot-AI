@@ -1,0 +1,22 @@
+{
+  "name": "@codepilot/sandbox-runner",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Runs configured check commands in a disposable, network-isolated, resource-limited container.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "jest",
+    "test:integration": "jest -c jest.integration.config.js --runInBand",
+    "image:build": "docker build -t codepilot/sandbox-node:22 ."
+  },
+  "devDependencies": {
+    "@codepilot/config": "workspace:*",
+    "@types/jest": "29.5.14",
+    "jest": "29.7.0",
+    "ts-jest": "29.4.15",
+    "typescript": "5.9.3"
+  }
+}
