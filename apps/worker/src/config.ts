@@ -8,6 +8,7 @@ const EnvSchema = z.object({
   DATABASE_URL: z.string().url(),
   REDIS_URL: z.string().url(),
   WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(32).default(2),
+  /** Repairs per approved plan after failing checks; 0 fails the task on the first failing check. */
   MAX_REPAIR_ATTEMPTS: z.coerce.number().int().min(0).max(5).default(2),
   WORKSPACE_ROOT: z.string().default("./.workspaces"),
 
@@ -47,6 +48,20 @@ const EnvSchema = z.object({
   PATCH_AUTHOR_NAME: z.string().min(1).max(100).default("CodePilot AI"),
   PATCH_AUTHOR_EMAIL: z.string().email().default("codepilot@codepilot.invalid"),
 
+  /** Checks run in Docker containers. Off means tasks fail at RUNNING_CHECKS with a clear reason. */
+  SANDBOX_ENABLED: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((v) => v === "true"),
+  SANDBOX_IMAGE: z.string().min(1).default("codepilot/sandbox-node:22"),
+  SANDBOX_MEMORY_MB: z.coerce.number().int().min(128).max(16_384).default(2_048),
+  SANDBOX_CPUS: z.coerce.number().min(0.25).max(16).default(2),
+  SANDBOX_PIDS: z.coerce.number().int().min(32).max(4_096).default(512),
+  SANDBOX_TMPFS_MB: z.coerce.number().int().min(16).max(8_192).default(512),
+  /** Output kept from each command (head and tail), and the part of it stored and shown to the model. */
+  CHECK_OUTPUT_KB: z.coerce.number().int().min(4).max(4_096).default(256),
+  CHECK_OUTPUT_CHARS: z.coerce.number().int().min(500).max(100_000).default(8_000),
+
   /** Input plus output tokens one task may spend across all of its model calls. */
   TASK_TOKEN_BUDGET: z.coerce.number().int().min(10_000).default(400_000),
   MODEL_TIMEOUT_SECONDS: z.coerce.number().int().min(30).max(1_800).default(300),
@@ -55,6 +70,8 @@ const EnvSchema = z.object({
   ANALYZE_TIMEOUT_SECONDS: z.coerce.number().int().min(30).max(3_600).default(600),
   PLAN_TIMEOUT_SECONDS: z.coerce.number().int().min(30).max(3_600).default(900),
   PATCH_TIMEOUT_SECONDS: z.coerce.number().int().min(30).max(3_600).default(1_200),
+  CHECKS_TIMEOUT_SECONDS: z.coerce.number().int().min(30).max(7_200).default(1_800),
+  REPAIR_TIMEOUT_SECONDS: z.coerce.number().int().min(30).max(3_600).default(1_200),
   /** How often a running job checks whether its task was cancelled. */
   CANCELLATION_POLL_MS: z.coerce.number().int().min(250).max(60_000).default(2_000),
 });
