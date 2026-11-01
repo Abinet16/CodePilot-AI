@@ -3,6 +3,7 @@ export * from "./branch-policy";
 export * from "./command-policy";
 export * from "./repair-policy";
 export * from "./prompt-fence";
+export * from "./secrets";
 export * from "./analysis";
 export * from "./planning";
 export * from "./patching";
