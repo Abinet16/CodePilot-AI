@@ -1,5 +1,5 @@
 import type { ImplementationPlan, PatchProposal } from "@codepilot/contracts";
-import { DEFAULT_PATCH_LIMITS, checkDiffLimits, reviewPatch } from "./patch-review";
+import { DEFAULT_PATCH_LIMITS, checkDiffLimits, planForRepair, reviewPatch } from "./patch-review";
 
 const plan: ImplementationPlan = {
   summary: "Count the last partial page",
@@ -102,5 +102,20 @@ describe("checkDiffLimits", () => {
 
   it("reports too many changed lines and an oversized diff", () => {
     expect(checkDiffLimits(stats, 2 * 1024 * 1024)).toEqual([expect.stringMatching(/1600 lines/), expect.stringMatching(/2048 KB/)]);
+  });
+});
+
+describe("planForRepair", () => {
+  it("turns created files into modifications and drops files already deleted", () => {
+    const repaired = planForRepair(plan, new Set(["src/pagination.ts", "src/pagination.test.ts"]));
+    expect(repaired.affectedFiles.map((f) => [f.path, f.change])).toEqual([
+      ["src/pagination.ts", "modify"],
+      ["src/pagination.test.ts", "modify"],
+    ]);
+  });
+
+  it("keeps a planned creation the previous patch skipped", () => {
+    const repaired = planForRepair(plan, new Set(["src/pagination.ts", "src/legacy.ts"]));
+    expect(repaired.affectedFiles.map((f) => f.change)).toEqual(["modify", "create", "delete"]);
   });
 });

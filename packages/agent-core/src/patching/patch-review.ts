@@ -114,3 +114,17 @@ export function checkDiffLimits(stats: readonly PatchFileStat[], diffBytes: numb
   }
   return problems;
 }
+
+/**
+ * The plan as it applies to a repair. The previous patch already ran, so a
+ * file the plan creates now exists and can only be modified, and a file the
+ * plan deletes is already gone. The plan's scope does not change.
+ */
+export function planForRepair(plan: ImplementationPlan, existing: ReadonlySet<string>): ImplementationPlan {
+  const affectedFiles = plan.affectedFiles.flatMap((f) => {
+    if (f.change === "create" && existing.has(f.path)) return [{ ...f, change: "modify" as const }];
+    if (f.change === "delete" && !existing.has(f.path)) return [];
+    return [f];
+  });
+  return { ...plan, affectedFiles };
+}
