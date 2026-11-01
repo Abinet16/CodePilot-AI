@@ -127,8 +127,9 @@ export class DockerSandbox {
       if (!state?.started) {
         return { ...base, status: "ERRORED", exitCode: null, error: exitCode === DOCKER_ERROR ? "The sandbox container could not be created" : "The sandbox container did not start" };
       }
-      // The runtime reports a missing or non-executable entrypoint in State.Error; a command exiting 127 itself does not.
-      if ((exitCode === NOT_EXECUTABLE || exitCode === NOT_FOUND) && state.error) {
+      // The init process (tini) reports an executable it could not start; a command that exits 127 itself does not print this.
+      const notStarted = /^\[FATAL tini \(\d+\)\] exec .* failed/m.test(base.output);
+      if ((exitCode === NOT_EXECUTABLE || exitCode === NOT_FOUND) && (notStarted || state.error)) {
         return { ...base, status: "ERRORED", exitCode, error: `${request.executable} could not be started in the sandbox` };
       }
       return { ...base, status: exitCode === 0 ? "PASSED" : "FAILED", exitCode, error: null };
