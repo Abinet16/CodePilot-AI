@@ -36,6 +36,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@codepilot/agent-core':
+        specifier: workspace:*
+        version: link:../../packages/agent-core
       '@codepilot/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts

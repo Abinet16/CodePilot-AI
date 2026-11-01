@@ -11,6 +11,7 @@
     "test:integration": "jest -c jest.integration.config.js --runInBand"
   },
   "dependencies": {
+    "@codepilot/agent-core": "workspace:*",
     "@codepilot/contracts": "workspace:*",
     "@codepilot/github": "workspace:*",
     "@nestjs/common": "11.2.8",
