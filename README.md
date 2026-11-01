@@ -43,6 +43,7 @@ cp .env.example .env
 pnpm setup              # install, generate Prisma client, build shared packages
 pnpm infra:up           # PostgreSQL 16 + Redis 7
 pnpm db:deploy          # apply migrations
+pnpm sandbox:build      # the container image checks run in (needs Docker)
 pnpm dev                # web :3000, api :4000/api, worker
 ```
 
@@ -62,7 +63,7 @@ To sign in and connect repositories, create a GitHub App first: see [docs/api/gi
 pnpm lint
 pnpm typecheck
 pnpm test               # unit tests (no infrastructure needed)
-pnpm test:integration   # needs PostgreSQL from `pnpm infra:up`
+pnpm test:integration   # needs PostgreSQL from `pnpm infra:up`; container tests also need `pnpm sandbox:build`
 ```
 
 CI (`.github/workflows/ci.yml`) runs all of the above, plus a schema-drift check and `pnpm audit`.
