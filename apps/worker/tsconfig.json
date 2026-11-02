@@ -6,7 +6,8 @@
     "paths": {
       "@codepilot/contracts": ["../../packages/contracts/src/index.ts"],
       "@codepilot/agent-core": ["../../packages/agent-core/src/index.ts"],
-      "@codepilot/github": ["../../packages/github/src/index.ts"]
+      "@codepilot/github": ["../../packages/github/src/index.ts"],
+      "@codepilot/sandbox-runner": ["../../services/sandbox-runner/src/index.ts"]
     }
   },
   "include": ["src", "test"]
