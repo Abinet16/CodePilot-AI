@@ -55,7 +55,15 @@ Before tasks can be verified, build the sandbox image once (`pnpm sandbox:build`
 
 Opening PRs needs the GitHub App's **Contents** and **Pull requests** permissions set to read & write, and the **Pull request** webhook event (see [docs/api/github-app-setup.md](docs/api/github-app-setup.md)).
 
-Planning, patching, and repairs need `ANTHROPIC_API_KEY` in `.env`; checks need Docker. Without them, tasks fail at the corresponding stage with a clear reason.
+Planning, patching, and repairs need a model provider, chosen with `MODEL_PROVIDER` in `.env`; checks need Docker. Without them, tasks fail at the corresponding stage with a clear reason.
+
+| `MODEL_PROVIDER` | Needs | Cost | Notes |
+| --- | --- | --- | --- |
+| `anthropic` (default) | `ANTHROPIC_API_KEY` | Paid | Claude; separate planning and patch models and effort levels |
+| `gemini` | `GEMINI_API_KEY` from [Google AI Studio](https://aistudio.google.com) | Free tier, rate-limited | Free-tier prompts (which include repository code) may be used by Google to improve its products |
+| `ollama` | [Ollama](https://ollama.com) running locally and `ollama pull <OLLAMA_MODEL>` | Free | Nothing leaves your machine; smaller models fail validation more often, so expect more failed tasks |
+
+Whatever the provider, model output goes through the same validation, plan contract, sandboxed checks, and human gates.
 
 To sign in and connect repositories, create a GitHub App first: see [docs/api/github-app-setup.md](docs/api/github-app-setup.md). Without one, GitHub routes return `503` in development. Endpoints are listed in [docs/api/endpoints.md](docs/api/endpoints.md).
 
