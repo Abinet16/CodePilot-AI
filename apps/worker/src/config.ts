@@ -22,7 +22,13 @@ const EnvSchema = z.object({
   /** Indexed commits kept per repository; older snapshots are deleted. */
   SNAPSHOTS_TO_KEEP: z.coerce.number().int().min(1).max(50).default(5),
 
-  /** Planning calls the Claude API. Without a key, tasks fail at PLANNING with a clear reason. */
+  /**
+   * Which model provider planning, patches, and repairs use. Without the provider's
+   * key (or a running Ollama), tasks fail at PLANNING with a clear reason.
+   */
+  MODEL_PROVIDER: z.enum(["anthropic", "gemini", "ollama"]).default("anthropic"),
+
+  /** Claude API (MODEL_PROVIDER=anthropic). The PLANNING_MODEL, PATCH_MODEL, and *_EFFORT settings apply to it. */
   ANTHROPIC_API_KEY: optionalString,
   PLANNING_MODEL: z
     .string()
@@ -61,6 +67,19 @@ const EnvSchema = z.object({
   /** Output kept from each command (head and tail), and the part of it stored and shown to the model. */
   CHECK_OUTPUT_KB: z.coerce.number().int().min(4).max(4_096).default(256),
   CHECK_OUTPUT_CHARS: z.coerce.number().int().min(500).max(100_000).default(8_000),
+
+  /** Gemini API (MODEL_PROVIDER=gemini). One model serves every stage. */
+  GEMINI_API_KEY: optionalString,
+  GEMINI_MODEL: z
+    .string()
+    .default("gemini-3.8-flash")
+    .refine(isPricedModel, { message: "has no entry in MODEL_PRICING, so its usage could not be costed" }),
+
+  /** A local Ollama server (MODEL_PROVIDER=ollama). Free and private; quality depends on the model and your hardware. */
+  OLLAMA_BASE_URL: z.string().url().default("http://localhost:11434"),
+  OLLAMA_MODEL: z.string().min(1).default("qwen2.5-coder:14b"),
+  /** Context window to load the model with; prompts must fit with room for the answer. */
+  OLLAMA_CONTEXT_TOKENS: z.coerce.number().int().min(8_192).max(262_144).default(32_768),
 
   /** Input plus output tokens one task may spend across all of its model calls. */
   TASK_TOKEN_BUDGET: z.coerce.number().int().min(10_000).default(400_000),
