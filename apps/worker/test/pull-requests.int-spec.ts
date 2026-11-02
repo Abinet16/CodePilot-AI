@@ -10,6 +10,7 @@ import { WorkspaceManager } from "../src/analysis/workspace";
 import { createPatchStage } from "../src/patching/patch-stage";
 import { runPipeline } from "../src/pipeline";
 import { createOpenPullRequestStage } from "../src/pull-requests/open-pr-stage";
+import { reconcilePullRequests } from "../src/pull-requests/reconcile";
 import { RunRecorder } from "../src/runs";
 import { TaskStateStore } from "../src/task-state";
 import { FakePullRequestGitHub } from "./fake-pr-github";
@@ -274,5 +275,45 @@ describe("open pull request stage (PostgreSQL, git)", () => {
     const { status, task: stored } = await open(task.id, null);
     expect(status).toBe("FAILED");
     expect(stored.failureReason).toBe("The GitHub App is not configured for the worker");
+  });
+
+  it("reconciles PRs a webhook missed, and skips recently confirmed ones", async () => {
+    const github = new FakePullRequestGitHub(fixture.dir);
+    const merged = await verifiedTask();
+    const untouched = await verifiedTask();
+    await open(merged.task.id, github);
+    await open(untouched.task.id, github);
+
+    const mergedPr = github.pulls.find((p) => p.head.ref === merged.patch.branchName)!;
+    Object.assign(mergedPr, { state: "closed", merged_at: "2099-01-01T00:00:00Z", closed_at: "2099-01-01T00:00:00Z", updated_at: "2099-01-01T00:00:00Z" });
+
+    const later = new Date(Date.now() + 60 * 60_000);
+    // Other suites' pull requests share the database; this fake GitHub only knows these two, so only they are asserted on.
+    const result = await reconcilePullRequests(prisma, github, { staleAfterMs: 10 * 60_000, limit: 500, now: later });
+    expect(result.updated).toBeGreaterThanOrEqual(1);
+
+    const rows = await prisma.pullRequest.findMany({ where: { taskId: { in: [merged.task.id, untouched.task.id] } } });
+    const byTask = new Map(rows.map((r) => [r.taskId, r]));
+    expect(byTask.get(merged.task.id)).toMatchObject({ status: "MERGED", mergedAt: new Date("2099-01-01T00:00:00Z"), lastSyncedAt: later });
+    expect(byTask.get(untouched.task.id)).toMatchObject({ status: "DRAFT", lastSyncedAt: later });
+    const events = await prisma.taskEvent.findMany({ where: { taskId: merged.task.id, eventType: "pull_request_merged" } });
+    expect(events).toHaveLength(1);
+
+    // Just confirmed, so a second run right away leaves them alone.
+    const calls = github.calls.length;
+    await reconcilePullRequests(prisma, github, { staleAfterMs: 10 * 60_000, limit: 500, now: later });
+    expect(github.calls.slice(calls).filter((c) => c.includes(String(mergedPr.number)))).toEqual([]);
+  });
+
+  it("keeps reconciling the rest when one PR cannot be read", async () => {
+    const github = new FakePullRequestGitHub(fixture.dir);
+    const gone = await verifiedTask();
+    await open(gone.task.id, github);
+    github.pulls.length = 0;
+
+    const later = new Date(Date.now() + 2 * 60 * 60_000);
+    const result = await reconcilePullRequests(prisma, github, { staleAfterMs: 10 * 60_000, limit: 500, now: later });
+    expect(result.failed).toBeGreaterThanOrEqual(1);
+    expect(await prisma.pullRequest.findUniqueOrThrow({ where: { taskId: gone.task.id } })).toMatchObject({ status: "DRAFT", lastSyncedAt: later });
   });
 });
