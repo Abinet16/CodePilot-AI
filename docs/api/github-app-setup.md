@@ -24,14 +24,14 @@ CodePilot AI uses a GitHub App, not personal access tokens. Create one at **GitH
 | Metadata | Read | Week 2 (mandatory) |
 | Contents | Read | Week 3 (clone and analyze) |
 | Issues | Read | Week 2 (issue ingestion) |
-| Contents | **Read & write** | Week 7 (push task branches) |
-| Pull requests | Read & write | Week 7 (open draft PRs) |
+| Contents | **Read & write** | Week 7 (push `codepilot/…` task branches; never the default branch) |
+| Pull requests | **Read & write** | Week 7 (open draft PRs, read their state) |
 
 Grant only what the current milestone needs. Each permission increase makes installers re-approve, which is the point.
 
 ### Webhook events
 
-`Installation` and `Installation repositories` are delivered automatically. Also subscribe to **Issues** and **Repository**.
+`Installation` and `Installation repositories` are delivered automatically. Also subscribe to **Issues**, **Repository**, and **Pull request** (week 7: keeps the status of agent-opened PRs current; a reconciliation job covers missed deliveries).
 
 ## Local configuration
 
