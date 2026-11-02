@@ -1,6 +1,6 @@
 # Data model
 
-Schema: `prisma/schema.prisma`. Migrations: `prisma/migrations/` (`init`, `auth_and_repository_access`, `repository_analysis`, `planning_and_runs`, `patch_attempts`, `sandbox_checks`).
+Schema: `prisma/schema.prisma`. Migrations: `prisma/migrations/` (`init`, `auth_and_repository_access`, `repository_analysis`, `planning_and_runs`, `patch_attempts`, `sandbox_checks`, `pull_requests`).
 
 ```mermaid
 erDiagram
@@ -48,7 +48,8 @@ erDiagram
 | `implementation_plans (task_id, version)` unique | Revisions append; earlier plans are kept. Reviews are a compare-and-set on `status = PROPOSED`, so a plan is approved or sent back exactly once |
 | `patches (task_id, version)` unique | Patch attempts append; a repair never overwrites an earlier attempt, even when it reproduces the same diff (`diff_hash` is indexed, not unique) |
 | `pull_requests (repository_id, github_pr_number)` unique | One row per real PR |
-| `idempotency_keys.key` primary key | Guards push/PR creation across retries and worker restarts |
+| `pull_requests.task_id` unique | A task opens at most one PR, however often OPENING_PR is retried |
+| `idempotency_keys.key` primary key | Guards push/PR creation across retries and worker restarts (`open-pr:<task>:<patch>`, with the opened PR as its result) |
 | `webhook_deliveries.delivery_id` primary key | GitHub's `X-GitHub-Delivery` dedupes redelivered webhooks |
 
 - `agent_tasks.base_sha` and `patches.base_sha` record exactly which commit was analyzed and patched.
@@ -64,3 +65,4 @@ erDiagram
 - `usage_records` has one row per **billed** call, linked to its run, priced at the model that actually answered (server-side fallback can change it) using `MODEL_PRICING` in `agent-core`. `input_tokens` includes cached input. The task token budget is checked against these rows.
 - `patches` stores each attempt: the approved plan it implements (`plan_id`), the run that wrote it, `base_sha`, the task `branch_name`, the local `commit_sha`, the `tree_sha`, the unified diff (`patch_content`, `--binary --full-index`) and its SHA-256, per-file stats (`files`), and `unchanged_plan_files`. The commit is never pushed from here. Applying the diff to `base_sha` must reproduce `tree_sha`, which is how later stages rebuild the workspace.
 - `implementation_plans.plan_json` is validated against `ImplementationPlanSchema` before insert and again on read; a plan that no longer validates is withheld from the API. `status` is `PROPOSED`, `APPROVED`, or `CHANGES_REQUESTED`, with `feedback`, `reviewed_by`, and `reviewed_at` recording the human review.
+- `pull_requests` links the PR to its task, repository, and the patch version that was pushed, with `branch_name`, `base_branch`, and `head_sha`. `status` (`DRAFT`, `OPEN`, `CLOSED`, `MERGED`), `merged_at`, and `closed_at` follow GitHub; `github_updated_at` is GitHub's own timestamp for the stored state, so older webhook deliveries are ignored; `last_synced_at` drives reconciliation.

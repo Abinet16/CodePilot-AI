@@ -129,4 +129,20 @@ REPAIRING: rebuild patch n as a commit on the task branch → failing output (fe
 - The worker drives Docker through its CLI. It never mounts the Docker socket, credentials, or its own environment into a container.
 - A verification that finished is never re-run after a crash; one left `RUNNING` is marked `ERRORED` and run again.
 
-See [state-machine.md](./state-machine.md), [data-model.md](./data-model.md), [ADR 0004](../decisions/0004-repository-analysis-and-retrieval.md), [ADR 0005](../decisions/0005-structured-planning-and-orchestration.md), [ADR 0006](../decisions/0006-patch-generation-and-git-workflow.md), and [ADR 0007](../decisions/0007-sandboxed-checks-and-bounded-repair.md).
+## Pull requests (READY_FOR_REVIEW → OPENING_PR → PR_OPENED)
+
+```
+reviewer: POST /tasks/:id/pull-request { patchVersion }   (WRITE+, CAS, audited)
+→ OPENING_PR: idempotency key open-pr:<task>:<patch>
+→ rebuild commit (stored diff on base, tree verified, fixed identity and date → same SHA every time)
+→ GitHub: branch absent → push --force-with-lease=<branch>: (create only)
+          branch at our SHA → skip push;  branch elsewhere → fail, untouched
+→ GitHub: PR for this head exists → reuse;  else create draft PR (body: evidence, neutralized text)
+→ pull_requests row (unique per task), patch SUBMITTED, key COMPLETED → PR_OPENED
+   └─ permanent failure or cancel after push → delete the pushed branch
+
+pull_request webhooks ─┐
+reconciliation job ────┴→ nextPullRequestState (ignores reports older than github_updated_at) → status, task event
+```
+
+See [state-machine.md](./state-machine.md), [data-model.md](./data-model.md), [ADR 0004](../decisions/0004-repository-analysis-and-retrieval.md), [ADR 0005](../decisions/0005-structured-planning-and-orchestration.md), [ADR 0006](../decisions/0006-patch-generation-and-git-workflow.md), [ADR 0007](../decisions/0007-sandboxed-checks-and-bounded-repair.md), and [ADR 0008](../decisions/0008-pull-request-integration.md).
