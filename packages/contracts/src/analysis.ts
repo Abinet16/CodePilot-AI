@@ -7,7 +7,7 @@ import { z } from "zod";
 
 export const ProjectProfileSchema = z.object({
   /** Indexed file count per detected language. */
-  languages: z.record(z.number().int().nonnegative()),
+  languages: z.record(z.string(), z.number().int().nonnegative()),
   primaryLanguage: z.string().nullable(),
   /** TypeScript/JavaScript is the supported ecosystem; others are analyzed but flagged. */
   supported: z.boolean(),
@@ -16,13 +16,13 @@ export const ProjectProfileSchema = z.object({
   frameworks: z.array(z.string()),
   testFrameworks: z.array(z.string()),
   /** package.json scripts relevant to verification, e.g. { test: "jest" }. */
-  scripts: z.record(z.string()),
+  scripts: z.record(z.string(), z.string()),
   monorepo: z.boolean(),
   /** Contributor or agent instruction files found at the root, e.g. AGENTS.md. */
   instructionFiles: z.array(z.string()),
   testFileCount: z.number().int().nonnegative(),
   /** Top-level directories with their indexed file counts. */
-  directories: z.record(z.number().int().nonnegative()),
+  directories: z.record(z.string(), z.number().int().nonnegative()),
 });
 
 export type ProjectProfile = z.infer<typeof ProjectProfileSchema>;
@@ -44,7 +44,7 @@ export type ContextSnippet = z.infer<typeof ContextSnippetSchema>;
 export const IndexStatsSchema = z.object({
   indexedFiles: z.number().int().nonnegative(),
   indexedBytes: z.number().int().nonnegative(),
-  skipped: z.record(z.number().int().nonnegative()),
+  skipped: z.record(z.string(), z.number().int().nonnegative()),
   /** True when a file or byte limit stopped indexing early. */
   truncated: z.boolean(),
 });
