@@ -2,6 +2,7 @@ export * from "./task-status";
 export * from "./plan";
 export * from "./patch";
 export * from "./checks";
+export * from "./pull-request";
 export * from "./api";
 export * from "./queue";
 export * from "./repositories";
