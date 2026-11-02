@@ -1,4 +1,5 @@
 import type { PatchFileStat, PlanFileChange } from "@codepilot/contracts";
+import { assertTaskBranch } from "@codepilot/agent-core";
 import { COMMIT_SHA } from "@codepilot/github";
 import { GitError, gitEnvironment, hardeningConfig, runGit } from "./git";
 
@@ -70,13 +71,19 @@ export async function commitPaths(
   return { commitSha, treeSha };
 }
 
-/** Commits whatever is staged, e.g. a stored diff applied with `applyDiff`. */
-export async function commitStaged(repo: LocalRepo, message: string, identity: CommitIdentity): Promise<string> {
+/**
+ * Commits whatever is staged, e.g. a stored diff applied with `applyDiff`.
+ * With a fixed `date`, rebuilding the same patch on the same base produces the
+ * same commit SHA, which is what makes a retried push a no-op.
+ */
+export async function commitStaged(repo: LocalRepo, message: string, identity: CommitIdentity, date?: Date): Promise<string> {
+  const when = date ? `${Math.floor(date.getTime() / 1000)} +0000` : undefined;
   await git(repo, "commit", ["--quiet", "--no-verify", "--cleanup=verbatim", "-m", message], {
     GIT_AUTHOR_NAME: identity.name,
     GIT_AUTHOR_EMAIL: identity.email,
     GIT_COMMITTER_NAME: identity.name,
     GIT_COMMITTER_EMAIL: identity.email,
+    ...(when ? { GIT_AUTHOR_DATE: when, GIT_COMMITTER_DATE: when } : {}),
   });
   return (await git(repo, "rev-parse", ["HEAD"])).trim();
 }
@@ -129,4 +136,44 @@ export async function resetTo(repo: LocalRepo, sha: string): Promise<void> {
 export async function applyDiff(repo: LocalRepo, diffFile: string): Promise<string> {
   await git(repo, "apply", ["--index", "--whitespace=nowarn", "--", diffFile]);
   return (await git(repo, "write-tree", [])).trim();
+}
+
+export interface PushOptions {
+  remoteUrl: string;
+  branch: string;
+  /** Installation token, passed through the environment only. */
+  token: string | null;
+  /** Branches git must never push to, such as the repository's default branch. */
+  protectedBranches: readonly string[];
+  /** Test fixtures use local file:// remotes; production only ever speaks https. */
+  allowFileProtocol?: boolean;
+}
+
+/**
+ * Pushes HEAD to the task branch, and only there. The lease requires the
+ * branch not to exist yet on the remote, so the push can never overwrite
+ * other work, even on a branch with the agent's prefix. Pushing the commit
+ * the branch already points at is a no-op, so a retry succeeds.
+ */
+export async function pushNewBranch(repo: LocalRepo, options: PushOptions): Promise<void> {
+  assertTaskBranch(options.branch, options.protectedBranches);
+  const ref = `refs/heads/${options.branch}`;
+  await runGit(
+    "push",
+    [
+      ...hardeningConfig(options.allowFileProtocol),
+      "-C",
+      repo.repoDir,
+      "push",
+      "--quiet",
+      "--no-verify",
+      `--force-with-lease=${ref}:`,
+      "--",
+      options.remoteUrl,
+      `HEAD:${ref}`,
+    ],
+    gitEnvironment(repo.homeDir, options.token),
+    repo.timeoutMs,
+    repo.signal,
+  );
 }

@@ -5,7 +5,7 @@ import path from "node:path";
 import { createFixtureRepo } from "../../test/git-fixture";
 import { fetchCommit } from "./git";
 import type { LocalRepo } from "./patch-ops";
-import { applyDiff, commitPaths, commitStaged, createBranch, diffFromBase, resetTo, trackedModes } from "./patch-ops";
+import { applyDiff, commitPaths, commitStaged, createBranch, diffFromBase, pushNewBranch, resetTo, trackedModes } from "./patch-ops";
 
 const identity = { name: "CodePilot AI", email: "codepilot@invalid" };
 
@@ -92,6 +92,48 @@ describe("patch git operations", () => {
     await resetTo(repo, fixture.commitSha);
     expect(show(repo, "rev-parse", "HEAD").trim()).toBe(fixture.commitSha);
     expect(show(repo, "status", "--porcelain")).toBe("");
+  });
+
+  it("gives a rebuilt commit the same SHA when its date is fixed", async () => {
+    const date = new Date("2026-11-02T10:00:00Z");
+    const shas: string[] = [];
+    for (let i = 0; i < 2; i++) {
+      const repo = await checkout();
+      writeFileSync(path.join(repo.repoDir, "src/pagination.ts"), "fixed\n");
+      show(repo, "add", "src/pagination.ts");
+      shas.push(await commitStaged(repo, "Fix pagination", identity, date));
+    }
+    expect(shas[0]).toBe(shas[1]);
+  });
+
+  it("pushes HEAD to a new task branch, repeats as a no-op, and never overwrites other work", async () => {
+    const repo = await checkout();
+    await createBranch(repo, "codepilot/push-1a2b3c4d");
+    writeFileSync(path.join(repo.repoDir, "src/pagination.ts"), "pushed\n");
+    const { commitSha } = await commitPaths(repo, ["src/pagination.ts"], "Push me", identity);
+    const options = { remoteUrl: fixture.url, branch: "codepilot/push-1a2b3c4d", token: null, protectedBranches: ["main"], allowFileProtocol: true };
+
+    await pushNewBranch(repo, options);
+    const remote = execFileSync("git", ["-C", fixture.dir, "rev-parse", "refs/heads/codepilot/push-1a2b3c4d"]).toString().trim();
+    expect(remote).toBe(commitSha);
+    // main on the remote is untouched.
+    expect(execFileSync("git", ["-C", fixture.dir, "rev-parse", "refs/heads/main"]).toString().trim()).toBe(fixture.commitSha);
+
+    // The same commit again is a no-op, so a retried push succeeds.
+    await expect(pushNewBranch(repo, options)).resolves.toBeUndefined();
+
+    // A different commit is refused: the branch exists, and the lease requires it not to.
+    writeFileSync(path.join(repo.repoDir, "src/pagination.ts"), "other\n");
+    await commitPaths(repo, ["src/pagination.ts"], "Other", identity);
+    await expect(pushNewBranch(repo, options)).rejects.toThrow(/git push failed/);
+    expect(execFileSync("git", ["-C", fixture.dir, "rev-parse", "refs/heads/codepilot/push-1a2b3c4d"]).toString().trim()).toBe(commitSha);
+  });
+
+  it("refuses to push to the default branch or outside the agent prefix", async () => {
+    const repo = await checkout();
+    const base = { remoteUrl: fixture.url, token: null, allowFileProtocol: true };
+    await expect(pushNewBranch(repo, { ...base, branch: "main", protectedBranches: ["main"] })).rejects.toThrow(/not allowed/);
+    await expect(pushNewBranch(repo, { ...base, branch: "codepilot/main", protectedBranches: ["codepilot/main"] })).rejects.toThrow(/protected/);
   });
 
   it("rejects a branch name git would not accept", async () => {

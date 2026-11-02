@@ -26,7 +26,7 @@ export interface CheckoutOptions {
   /** Creates and switches to this branch at the base. */
   branch?: string;
   /** A stored patch to apply on top of the base, verified against its tree SHA. */
-  patch?: { diff: string; treeSha: string; commit?: { message: string; identity: CommitIdentity } };
+  patch?: { diff: string; treeSha: string; commit?: { message: string; identity: CommitIdentity; date?: Date } };
 }
 
 /** The applied diff did not produce the tree that was stored with it. */
@@ -71,7 +71,10 @@ export async function checkoutForTask(
     await writeFile(diffFile, options.patch.diff);
     const tree = await applyDiff(repo, diffFile);
     if (tree !== options.patch.treeSha) throw new PatchIntegrityError(options.patch.treeSha, tree);
-    if (options.patch.commit) headSha = await commitStaged(repo, options.patch.commit.message, options.patch.commit.identity);
+    if (options.patch.commit) {
+      const { message, identity, date } = options.patch.commit;
+      headSha = await commitStaged(repo, message, identity, date);
+    }
   }
   return { repo, headSha };
 }
