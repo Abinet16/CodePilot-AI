@@ -16,7 +16,7 @@ issue → analyze repo (pinned SHA) → structured plan → [human approves] →
 | `v0.1` | Secure GitHub connection and repository analysis (week 3: tasks, pinned commits, indexing, context retrieval) | ✅ done |
 | `v0.2` | Structured plans and patch generation (week 4: Claude-generated plans, human plan review, runs and usage, timeouts, retries, cancellation; week 5: plan-bound patches committed on a task branch, versioned with their diff) | ✅ done |
 | `v0.3` | Sandboxed tests and bounded repair loop (week 6: maintainer-configured checks in isolated containers, per-patch results, bounded repairs) | ✅ done |
-| `v0.4` | Automated draft pull requests | ⏳ week 7 |
+| `v0.4` | Automated draft pull requests (week 7: reviewer-approved, idempotent push and draft PR with check evidence, webhook and scheduled sync of PR state) | ✅ done |
 | `v1.0` | Deployed, evaluated, documented product | ⏳ weeks 8–10 |
 
 ## Repository layout
@@ -51,7 +51,9 @@ Check `http://localhost:4000/api/health`, or open `http://localhost:3000` to see
 
 With a repository enabled, start a task at `/tasks/new`. The worker pins the default branch's head commit, indexes it, and asks Claude for a structured implementation plan grounded in the code it found. The task page shows the plan, the files it touches and why, and the tokens and estimated cost of each model call. Approve the plan, or request changes and get a revised version (up to 3). Once approved, the worker implements the plan in a disposable checkout of the pinned commit, commits it on a `codepilot/…` branch, and the task page shows the commit, the files changed, and the diff.
 
-Before tasks can be verified, build the sandbox image once (`pnpm sandbox:build`) and have a maintainer set the repository's checks under **Repositories → Checks** (detected suggestions are offered). After a patch, the worker rebuilds it in a fresh checkout, runs the install step and each check in isolated containers, and shows the results per patch version. Failing checks go back to the model for up to `MAX_REPAIR_ATTEMPTS` repairs within the approved plan. A task whose checks pass stops at `READY_FOR_REVIEW`; opening the draft pull request arrives in week 7, and nothing is pushed to GitHub yet.
+Before tasks can be verified, build the sandbox image once (`pnpm sandbox:build`) and have a maintainer set the repository's checks under **Repositories → Checks** (detected suggestions are offered). After a patch, the worker rebuilds it in a fresh checkout, runs the install step and each check in isolated containers, and shows the results per patch version. Failing checks go back to the model for up to `MAX_REPAIR_ATTEMPTS` repairs within the approved plan. A task whose checks pass stops at `READY_FOR_REVIEW`. Review the diff and the check output, then **Open draft PR**: the worker pushes the verified patch to its `codepilot/…` branch and opens a draft pull request with the plan, files, check results, limitations, and an AI-authorship note. The PR's status (draft, open, merged, closed) stays current through webhooks and a scheduled reconciliation. The agent never merges.
+
+Opening PRs needs the GitHub App's **Contents** and **Pull requests** permissions set to read & write, and the **Pull request** webhook event (see [docs/api/github-app-setup.md](docs/api/github-app-setup.md)).
 
 Planning, patching, and repairs need `ANTHROPIC_API_KEY` in `.env`; checks need Docker. Without them, tasks fail at the corresponding stage with a clear reason.
 
