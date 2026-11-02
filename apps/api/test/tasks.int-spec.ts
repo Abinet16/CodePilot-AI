@@ -488,6 +488,78 @@ describe("tasks API (PostgreSQL)", () => {
     await bob.get(`/api/repositories/${aliceOnly.id}/checks`).expect(404);
   });
 
+  /** A task at READY_FOR_REVIEW with a verified patch version 1. */
+  async function reviewableTask(): Promise<{ id: string; patchId: string }> {
+    const id = await plannedTask();
+    const plan = await prisma.implementationPlan.update({
+      where: { taskId_version: { taskId: id, version: 1 } },
+      data: { status: "APPROVED", approvedAt: new Date() },
+    });
+    const run = await prisma.agentRun.create({ data: { taskId: id, attemptNumber: 2, stage: "GENERATING_PATCH", model: "claude-opus-5-5", status: "SUCCEEDED" } });
+    const patch = await prisma.patch.create({
+      data: {
+        taskId: id,
+        version: 1,
+        planId: plan.id,
+        runId: run.id,
+        baseSha: SHA,
+        branchName: `codepilot/fix-${id.slice(0, 8)}`,
+        commitSha: "c".repeat(40),
+        treeSha: "e".repeat(40),
+        summary: "Use Math.ceil",
+        commitMessage: "Fix pagination",
+        model: "claude-opus-5-5",
+        patchContent: "diff",
+        diffHash: "f".repeat(64),
+        files: [],
+        unchangedPlanFiles: [],
+        additions: 1,
+        deletions: 1,
+        status: "VERIFIED",
+      },
+    });
+    await prisma.agentTask.update({ where: { id }, data: { status: "READY_FOR_REVIEW" } });
+    return { id, patchId: patch.id };
+  }
+
+  it("opens a pull request only for the verified patch under review, with WRITE permission", async () => {
+    const { id } = await reviewableTask();
+    await bob.post(`/api/tasks/${id}/pull-request`).send({ patchVersion: 1 }).expect(403);
+    await alice.post(`/api/tasks/${id}/pull-request`).send({ patchVersion: 2 }).expect(409);
+    await alice.post(`/api/tasks/${id}/pull-request`).send({ patchVersion: 1, draft: false }).expect(400);
+
+    const detail = (await alice.post(`/api/tasks/${id}/pull-request`).send({ patchVersion: 1 }).expect(200)).body as TaskDetail;
+    expect(detail.status).toBe("OPENING_PR");
+    expect(queue.jobIds).toContain(taskJobId(id, "pr-v1"));
+    expect(detail.events.at(-1)).toMatchObject({ fromStatus: "READY_FOR_REVIEW", toStatus: "OPENING_PR", payload: { reason: "pull_request_requested", patchVersion: 1 } });
+    expect(await prisma.auditLog.count({ where: { taskId: id, action: "pull_request.requested" } })).toBe(1);
+
+    // A second click (or a second reviewer) finds the task already moving.
+    await alice.post(`/api/tasks/${id}/pull-request`).send({ patchVersion: 1 }).expect(409);
+
+    await alice.post(`/api/tasks/${id}/cancel`).expect(200);
+    expect(queue.removed).toContain(taskJobId(id, "pr-v1"));
+  });
+
+  it("shows the opened pull request on the task", async () => {
+    const { id, patchId } = await reviewableTask();
+    await prisma.pullRequest.create({
+      data: {
+        taskId: id,
+        repositoryId: shared.id,
+        patchId,
+        githubPrNumber: 4_000 + (base % 1_000),
+        githubPrUrl: "https://github.com/acme/shop/pull/4",
+        headSha: "c".repeat(40),
+        branchName: `codepilot/fix-${id.slice(0, 8)}`,
+        baseBranch: "main",
+        status: "DRAFT",
+      },
+    });
+    const detail = (await bob.get(`/api/tasks/${id}`).expect(200)).body as TaskDetail;
+    expect(detail.pullRequest).toMatchObject({ url: "https://github.com/acme/shop/pull/4", status: "DRAFT", patchVersion: 1, baseBranch: "main", mergedAt: null });
+  });
+
   it("removes pending resume jobs when a task under review is cancelled", async () => {
     const id = await plannedTask(2);
     await alice.post(`/api/tasks/${id}/cancel`).expect(200);

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { ContextPackage } from "./analysis";
 import type { TestRunSummary } from "./checks";
+import type { PullRequestSummary } from "./pull-request";
 import type { PatchSummary } from "./patch";
 import type { PlanSummary } from "./plan";
 import type { TaskStatus } from "./task-status";
@@ -77,6 +78,8 @@ export interface TaskDetail extends TaskSummary {
   patches: PatchSummary[];
   /** Sandbox verifications, oldest first, each linked to the patch version it checked. */
   checks: TestRunSummary[];
+  /** The draft PR, once OPENING_PR has completed. */
+  pullRequest: PullRequestSummary | null;
   runs: AgentRunSummary[];
   usage: UsageTotals;
   events: TaskEventSummary[];

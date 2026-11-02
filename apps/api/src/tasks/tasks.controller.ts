@@ -4,6 +4,8 @@ import {
   ApprovePlanRequestSchema,
   CreateTaskRequest,
   CreateTaskRequestSchema,
+  OpenPullRequestRequest,
+  OpenPullRequestRequestSchema,
   PatchDetail,
   RequestPlanChangesRequest,
   RequestPlanChangesRequestSchema,
@@ -70,5 +72,15 @@ export class TasksController {
     @Body(new ZodBodyPipe(RequestPlanChangesRequestSchema)) body: RequestPlanChangesRequest,
   ): Promise<TaskDetail> {
     return this.tasks.requestPlanChanges(user.id, id, body.version, body.feedback);
+  }
+
+  @Post(":id/pull-request")
+  @HttpCode(200)
+  openPullRequest(
+    @CurrentUser() user: AuthUser,
+    @Param("id", new ParseUUIDPipe()) id: string,
+    @Body(new ZodBodyPipe(OpenPullRequestRequestSchema)) body: OpenPullRequestRequest,
+  ): Promise<TaskDetail> {
+    return this.tasks.openPullRequest(user.id, id, body.patchVersion);
   }
 }

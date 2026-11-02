@@ -8,6 +8,7 @@ import type {
   PatchDetail,
   PatchFileStat,
   PatchSummary,
+  PullRequestSummary,
   RepositoryPermission,
   TaskDetail,
   TestRunSummary,
@@ -31,6 +32,7 @@ import type {
   Issue,
   Patch,
   Prisma,
+  PullRequest,
   Repository,
   TaskEvent,
   TestResult,
@@ -72,7 +74,24 @@ type DetailRow = TaskRow & {
   plans: Array<PlanRow & { reviewedBy: { githubLogin: string } | null }>;
   patches: PatchRow[];
   testRuns: TestRunRow[];
+  pullRequests: Array<PullRequest & { patch: { version: number } | null }>;
 };
+
+function toPullRequestSummary(pr: DetailRow["pullRequests"][number]): PullRequestSummary {
+  return {
+    number: pr.githubPrNumber,
+    url: pr.githubPrUrl,
+    status: pr.status,
+    patchVersion: pr.patch?.version ?? null,
+    branchName: pr.branchName,
+    baseBranch: pr.baseBranch,
+    headSha: pr.headSha,
+    createdAt: pr.createdAt.toISOString(),
+    mergedAt: pr.mergedAt?.toISOString() ?? null,
+    closedAt: pr.closedAt?.toISOString() ?? null,
+    lastSyncedAt: pr.lastSyncedAt?.toISOString() ?? null,
+  };
+}
 
 type TestRunRow = TestRun & { results: TestResult[]; patch: { version: number } | null };
 
@@ -161,6 +180,7 @@ function toDetail(task: DetailRow, usage: UsageTotals): TaskDetail {
     }),
     patches: task.patches.map(toPatchSummary),
     checks: task.testRuns.map(toTestRunSummary),
+    pullRequest: task.pullRequests[0] ? toPullRequestSummary(task.pullRequests[0]) : null,
     runs: task.runs.map(toRunSummary),
     usage,
     events: task.events.map((e) => ({
@@ -183,6 +203,7 @@ const detailInclude = {
   // Diffs can be large, so the detail leaves them out; they are fetched one version at a time.
   patches: { orderBy: { version: "asc" }, omit: { patchContent: true }, include: { plan: { select: { version: true } } } },
   testRuns: { orderBy: { startedAt: "asc" }, include: { results: { orderBy: { position: "asc" } }, patch: { select: { version: true } } } },
+  pullRequests: { include: { patch: { select: { version: true } } } },
 } satisfies Prisma.AgentTaskInclude;
 
 /**
@@ -296,8 +317,15 @@ export class TasksService {
       await this.audit.record({ userId, taskId, action: "task.cancelled", metadata: { fromStatus: task.status } }, tx);
     });
 
-    const latest = await this.prisma.implementationPlan.findFirst({ where: { taskId }, orderBy: { version: "desc" } });
-    const keys: TaskJobKey[] = ["start", ...(latest ? ([`plan-v${latest.version}-approved`, `plan-v${latest.version}-revise`] as const) : [])];
+    const [latest, latestPatch] = await Promise.all([
+      this.prisma.implementationPlan.findFirst({ where: { taskId }, orderBy: { version: "desc" } }),
+      this.prisma.patch.findFirst({ where: { taskId }, orderBy: { version: "desc" } }),
+    ]);
+    const keys: TaskJobKey[] = [
+      "start",
+      ...(latest ? ([`plan-v${latest.version}-approved`, `plan-v${latest.version}-revise`] as const) : []),
+      ...(latestPatch ? ([`pr-v${latestPatch.version}`] as const) : []),
+    ];
     await this.queue.remove(taskId, keys).catch(() => undefined);
     return this.get(userId, taskId);
   }
@@ -334,6 +362,27 @@ export class TasksService {
     return this.get(userId, taskId);
   }
 
+  /**
+   * The human gate before anything leaves the worker: pushes the verified
+   * patch the reviewer looked at and opens a draft PR. Names the patch
+   * version, so a newer or unverified version is never pushed by mistake.
+   */
+  async openPullRequest(userId: string, taskId: string, patchVersion: number): Promise<TaskDetail> {
+    const task = await this.writableTask(userId, taskId);
+    if (task.status !== TaskStatus.READY_FOR_REVIEW) throw new ConflictException(`Task is ${task.status}, not ready for review`);
+    const latest = await this.prisma.patch.findFirst({ where: { taskId }, orderBy: { version: "desc" } });
+    if (!latest || latest.version !== patchVersion || latest.status !== "VERIFIED") {
+      throw new ConflictException(`Patch version ${patchVersion} is not the verified patch awaiting review; reload and try again`);
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await this.resume(tx, taskId, TaskStatus.OPENING_PR, { reason: "pull_request_requested", patchVersion }, TaskStatus.READY_FOR_REVIEW);
+      await this.audit.record({ userId, taskId, action: "pull_request.requested", metadata: { patchVersion, branch: latest.branchName } }, tx);
+    });
+    await this.enqueueOrFail(taskId, `pr-v${patchVersion}`, TaskStatus.OPENING_PR);
+    return this.get(userId, taskId);
+  }
+
   private async writableTask(userId: string, taskId: string): Promise<AgentTask> {
     const task = await this.prisma.agentTask.findUnique({ where: { id: taskId } });
     const access = task ? await this.access(userId, task.repositoryId) : null;
@@ -355,8 +404,7 @@ export class TasksService {
     if (count !== 1) throw new ConflictException(`Plan version ${version} is not the plan awaiting review; reload and try again`);
   }
 
-  private async resume(tx: Prisma.TransactionClient, taskId: string, to: TaskStatus, payload: Prisma.InputJsonObject) {
-    const from = TaskStatus.AWAITING_PLAN_APPROVAL;
+  private async resume(tx: Prisma.TransactionClient, taskId: string, to: TaskStatus, payload: Prisma.InputJsonObject, from: TaskStatus = TaskStatus.AWAITING_PLAN_APPROVAL) {
     const { count } = await tx.agentTask.updateMany({ where: { id: taskId, status: from }, data: { status: to } });
     if (count !== 1) throw new ConflictException("Task status changed; reload and try again");
     await tx.taskEvent.create({ data: { taskId, eventType: "status_changed", fromStatus: from, toStatus: to, payload } });
