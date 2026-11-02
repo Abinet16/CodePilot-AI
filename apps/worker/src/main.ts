@@ -15,7 +15,7 @@ import { WorkspaceManager } from "./analysis/workspace";
 import { watchForCancellation } from "./cancellation";
 import { loadConfig } from "./config";
 import { runPipeline } from "./pipeline";
-import { AnthropicModel } from "./model/anthropic-model";
+import { createModels } from "./model/factory";
 import { createPatchStage } from "./patching/patch-stage";
 import { createRepairStage } from "./patching/repair-stage";
 import { createOpenPullRequestStage } from "./pull-requests/open-pr-stage";
@@ -37,12 +37,12 @@ async function main(): Promise<void> {
       : null;
   if (!github) console.warn("[worker] GitHub App is not configured; repository analysis will fail");
 
-  const modelTimeoutMs = config.MODEL_TIMEOUT_SECONDS * 1000;
-  const apiKey = config.ANTHROPIC_API_KEY;
-  const planModel = apiKey ? AnthropicModel.fromApiKey(apiKey, config.PLANNING_MODEL, config.PLANNING_EFFORT, modelTimeoutMs) : null;
-  const patchModel = apiKey ? AnthropicModel.fromApiKey(apiKey, config.PATCH_MODEL, config.PATCH_EFFORT, modelTimeoutMs) : null;
-  if (!apiKey) console.warn("[worker] ANTHROPIC_API_KEY is not set; planning and patch generation will fail");
-  const runs = new RunRecorder(prisma);
+  const models = createModels(config);
+  const planModel = models.planning;
+  const patchModel = models.patch;
+  if (models.missing) console.warn(`[worker] ${models.missing}; planning and patch generation will fail`);
+  else console.log(`[worker] model provider: ${models.provider} (planning ${planModel?.model}, patches ${patchModel?.model})`);
+  const runs = new RunRecorder(prisma, models.provider);
 
   const analyze = createAnalyzeStage({
     prisma,
