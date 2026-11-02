@@ -1,4 +1,5 @@
 import { Injectable } from "@nestjs/common";
+import { nextPullRequestState } from "@codepilot/agent-core";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { AuditService } from "../audit/audit.service";
@@ -41,6 +42,20 @@ const RepositoryEvent = z.object({
     default_branch: z.string(),
     private: z.boolean(),
   }),
+});
+
+const PullRequestEvent = z.object({
+  action: z.string(),
+  pull_request: z.object({
+    number: z.number().int().positive(),
+    state: z.enum(["open", "closed"]),
+    draft: z.boolean().optional(),
+    merged_at: z.string().nullable(),
+    closed_at: z.string().nullable(),
+    updated_at: z.string(),
+    head: z.object({ sha: z.string().regex(/^[0-9a-f]{40}$/) }),
+  }),
+  repository: z.object({ id: Id }),
 });
 
 type Tx = Prisma.TransactionClient;
@@ -87,6 +102,8 @@ export class WebhookService {
         return this.onIssues(tx, payload);
       case "repository":
         return this.onRepository(tx, payload);
+      case "pull_request":
+        return this.onPullRequest(tx, deliveryId, payload);
       default:
         return Promise.resolve("ignored");
     }
@@ -192,6 +209,29 @@ export class WebhookService {
       },
     });
     return count > 0 ? "processed" : "ignored";
+  }
+
+  /**
+   * Keeps pull requests the agent opened in step with GitHub. Other pull
+   * requests are ignored. A delivery older than the stored state (GitHub can
+   * deliver out of order, and redeliver late) does not roll it back.
+   */
+  private async onPullRequest(tx: Tx, deliveryId: string, payload: unknown): Promise<WebhookOutcome> {
+    const parsed = PullRequestEvent.safeParse(payload);
+    if (!parsed.success) return "ignored";
+    const { pull_request: pr, repository } = parsed.data;
+
+    const row = await tx.pullRequest.findFirst({ where: { githubPrNumber: pr.number, repository: { githubRepoId: BigInt(repository.id) } } });
+    if (!row) return "ignored";
+    const update = nextPullRequestState(row, pr);
+    if (!update) return "ignored";
+
+    const { event, ...data } = update;
+    await tx.pullRequest.update({ where: { id: row.id }, data: { ...data, lastSyncedAt: new Date() } });
+    if (event) {
+      await tx.taskEvent.create({ data: { taskId: row.taskId, eventType: event, payload: { number: pr.number, source: "webhook", deliveryId } } });
+    }
+    return "processed";
   }
 
   /** Disables the agent and revokes every user's access; history rows are kept. */

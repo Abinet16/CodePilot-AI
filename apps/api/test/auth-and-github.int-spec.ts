@@ -235,6 +235,67 @@ describe("auth, repository access, and webhooks (PostgreSQL)", () => {
       expect((await sendWebhook("issues", delivery("issue-unknown"), unknown).expect(200)).body.outcome).toBe("ignored");
     });
 
+    it("keeps agent-opened pull requests in step, ignoring late and foreign deliveries", async () => {
+      const shared = await prisma.repository.findUniqueOrThrow({ where: { githubRepoId: BigInt(ids.shared) } });
+      const user = await prisma.user.create({ data: { githubId: BigInt(base + 77), githubLogin: `pr-owner-${base}` } });
+      const task = await prisma.agentTask.create({ data: { repositoryId: shared.id, requestedById: user.id, description: "Open a PR", status: "PR_OPENED" } });
+      const number = 9_000 + (base % 1_000);
+      await prisma.pullRequest.create({
+        data: {
+          taskId: task.id,
+          repositoryId: shared.id,
+          githubPrNumber: number,
+          githubPrUrl: `https://github.com/acme/shared/pull/${number}`,
+          headSha: "a".repeat(40),
+          branchName: "codepilot/fix-1a2b3c4d",
+          baseBranch: "main",
+          status: "DRAFT",
+          githubUpdatedAt: new Date("2026-11-02T10:00:00Z"),
+        },
+      });
+      const event = (action: string, fields: object) => ({
+        action,
+        pull_request: {
+          number,
+          state: "open",
+          draft: true,
+          merged_at: null,
+          closed_at: null,
+          updated_at: "2026-11-02T10:00:00Z",
+          head: { sha: "a".repeat(40) },
+          ...fields,
+        },
+        repository: { id: ids.shared },
+      });
+      const stored = () => prisma.pullRequest.findUniqueOrThrow({ where: { taskId: task.id } });
+
+      await sendWebhook("pull_request", delivery("pr-ready"), event("ready_for_review", { draft: false, updated_at: "2026-11-02T10:05:00Z" })).expect(200);
+      expect(await stored()).toMatchObject({ status: "OPEN" });
+
+      // A delivery older than what is stored (GitHub does not guarantee order) changes nothing.
+      const late = event("closed", { state: "closed", closed_at: "2026-11-02T10:01:00Z", updated_at: "2026-11-02T10:01:00Z" });
+      expect((await sendWebhook("pull_request", delivery("pr-late"), late).expect(200)).body.outcome).toBe("ignored");
+      expect(await stored()).toMatchObject({ status: "OPEN" });
+
+      const merged = event("closed", {
+        state: "closed",
+        draft: false,
+        merged_at: "2026-11-02T11:00:00Z",
+        closed_at: "2026-11-02T11:00:00Z",
+        updated_at: "2026-11-02T11:00:00Z",
+        head: { sha: "b".repeat(40) },
+      });
+      await sendWebhook("pull_request", delivery("pr-merged"), merged).expect(200);
+      expect((await sendWebhook("pull_request", delivery("pr-merged"), merged).expect(200)).body.outcome).toBe("duplicate");
+      expect(await stored()).toMatchObject({ status: "MERGED", headSha: "b".repeat(40), mergedAt: new Date("2026-11-02T11:00:00Z") });
+
+      const events = await prisma.taskEvent.findMany({ where: { taskId: task.id }, orderBy: { createdAt: "asc" } });
+      expect(events.map((e) => e.eventType)).toEqual(["pull_request_ready_for_review", "pull_request_merged"]);
+
+      const foreign = { ...event("opened", {}), pull_request: { ...event("opened", {}).pull_request, number: number + 1 } };
+      expect((await sendWebhook("pull_request", delivery("pr-foreign"), foreign).expect(200)).body.outcome).toBe("ignored");
+    });
+
     it("disables and revokes access when a repository is removed from the installation", async () => {
       const { agent } = await login("alice-code");
       const target = await prisma.repository.findUniqueOrThrow({ where: { githubRepoId: BigInt(ids.aliceOnly) } });
