@@ -8,3 +8,4 @@ export * from "./analysis";
 export * from "./planning";
 export * from "./patching";
 export * from "./checks";
+export * from "./pull-request";
