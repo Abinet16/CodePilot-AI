@@ -7,9 +7,11 @@ import { AutoRefresh } from "./auto-refresh";
 import { CancelButton } from "./cancel-button";
 import { ChecksView } from "./checks-view";
 import { DiffView } from "./diff-view";
+import { OpenPullRequestButton } from "./open-pr-button";
 import { PlanReview } from "./plan-review";
 import { PatchView } from "./patch-view";
 import { PlanView } from "./plan-view";
+import { PullRequestView } from "./pull-request-view";
 
 export const dynamic = "force-dynamic";
 
@@ -88,6 +90,13 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
         </section>
       )}
 
+      {(task.pullRequest || task.status === "OPENING_PR") && (
+        <section className="card">
+          <h2>Pull request</h2>
+          {task.pullRequest ? <PullRequestView pr={task.pullRequest} /> : <p className="muted">Pushing the branch and opening the draft pull request…</p>}
+        </section>
+      )}
+
       {currentPatch && (
         <section className="card">
           <h2>Patch</h2>
@@ -107,10 +116,10 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
           {task.status === "RUNNING_CHECKS" && task.checks.at(-1)?.status !== "RUNNING" && <p className="muted">Starting the sandbox…</p>}
           {task.status === "REPAIRING" && <p className="muted">Checks failed; the agent is repairing the patch…</p>}
           {task.status === "READY_FOR_REVIEW" && (
-            <p className="notice small">
-              Checks passed on patch v{currentPatch?.version}. Passing checks are evidence, not proof: review the diff. Opening a draft pull request
-              arrives in week 7.
-            </p>
+            <p className="notice small">Checks passed on patch v{currentPatch?.version}. Passing checks are evidence, not proof: review the diff.</p>
+          )}
+          {task.status === "READY_FOR_REVIEW" && currentPatch?.status === "VERIFIED" && (
+            <OpenPullRequestButton taskId={task.id} patchVersion={currentPatch.version} />
           )}
           {[...task.checks].reverse().map((run, i) =>
             i === 0 ? (
