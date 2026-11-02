@@ -72,6 +72,12 @@ const EnvSchema = z.object({
   PATCH_TIMEOUT_SECONDS: z.coerce.number().int().min(30).max(3_600).default(1_200),
   CHECKS_TIMEOUT_SECONDS: z.coerce.number().int().min(30).max(7_200).default(1_800),
   REPAIR_TIMEOUT_SECONDS: z.coerce.number().int().min(30).max(3_600).default(1_200),
+  OPEN_PR_TIMEOUT_SECONDS: z.coerce.number().int().min(30).max(3_600).default(600),
+
+  /** How often open pull requests are checked against GitHub, for anything a webhook missed. */
+  PR_RECONCILE_INTERVAL_SECONDS: z.coerce.number().int().min(60).max(86_400).default(600),
+  /** Pull requests confirmed more recently than this are skipped by reconciliation. */
+  PR_RECONCILE_STALE_SECONDS: z.coerce.number().int().min(30).max(86_400).default(300),
   /** How often a running job checks whether its task was cancelled. */
   CANCELLATION_POLL_MS: z.coerce.number().int().min(250).max(60_000).default(2_000),
 });
