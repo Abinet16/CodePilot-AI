@@ -5,7 +5,7 @@ import type { RunTaskJob } from "@codepilot/contracts";
 import { GitHubAppClient } from "@codepilot/github";
 import { DockerSandbox } from "@codepilot/sandbox-runner";
 import { PrismaClient } from "@prisma/client";
-import { Worker } from "bullmq";
+import { Queue, Worker } from "bullmq";
 import Redis from "ioredis";
 import { createAnalyzeStage } from "./analysis/analyze-stage";
 import { createChecksStage } from "./checks/checks-stage";
@@ -18,6 +18,8 @@ import { runPipeline } from "./pipeline";
 import { AnthropicModel } from "./model/anthropic-model";
 import { createPatchStage } from "./patching/patch-stage";
 import { createRepairStage } from "./patching/repair-stage";
+import { createOpenPullRequestStage } from "./pull-requests/open-pr-stage";
+import { reconcilePullRequests } from "./pull-requests/reconcile";
 import { createPlanStage } from "./planning/plan-stage";
 import { RunRecorder } from "./runs";
 import { StaleTransitionError, TaskStateStore } from "./task-state";
@@ -98,6 +100,14 @@ async function main(): Promise<void> {
     maxRepairs: config.MAX_REPAIR_ATTEMPTS,
   });
 
+  const openPullRequest = createOpenPullRequestStage({
+    prisma,
+    github,
+    workspaces,
+    gitTimeoutMs: config.GIT_TIMEOUT_SECONDS * 1000,
+    author: { name: config.PATCH_AUTHOR_NAME, email: config.PATCH_AUTHOR_EMAIL },
+  });
+
   // A workspace older than any stage that uses one could take was left by a crashed worker.
   const longestStageMs = 1000 * Math.max(config.ANALYZE_TIMEOUT_SECONDS, config.PATCH_TIMEOUT_SECONDS, config.CHECKS_TIMEOUT_SECONDS, config.REPAIR_TIMEOUT_SECONDS);
   const swept = await workspaces.sweep(2 * longestStageMs);
@@ -119,13 +129,13 @@ async function main(): Promise<void> {
           taskId,
           {
             stages: {
-              // Week 7: OPENING_PR
               [TaskStatus.QUEUED]: async () => TaskStatus.ANALYZING,
               [TaskStatus.ANALYZING]: analyze,
               [TaskStatus.PLANNING]: plan,
               [TaskStatus.GENERATING_PATCH]: patch,
               [TaskStatus.RUNNING_CHECKS]: checks,
               [TaskStatus.REPAIRING]: repair,
+              [TaskStatus.OPENING_PR]: openPullRequest,
             },
             stageTimeoutsMs: {
               [TaskStatus.ANALYZING]: config.ANALYZE_TIMEOUT_SECONDS * 1000,
@@ -133,6 +143,7 @@ async function main(): Promise<void> {
               [TaskStatus.GENERATING_PATCH]: config.PATCH_TIMEOUT_SECONDS * 1000,
               [TaskStatus.RUNNING_CHECKS]: config.CHECKS_TIMEOUT_SECONDS * 1000,
               [TaskStatus.REPAIRING]: config.REPAIR_TIMEOUT_SECONDS * 1000,
+              [TaskStatus.OPENING_PR]: config.OPEN_PR_TIMEOUT_SECONDS * 1000,
             },
             loadStatus,
             transition: (id, from, to) => store.transition(id, from, to),
@@ -167,9 +178,30 @@ async function main(): Promise<void> {
   worker.on("failed", (job, err) => console.error(`[worker] job ${job?.id} failed: ${err.message}`));
   console.log(`[worker] consuming "${QUEUES.AGENT_TASKS}" with concurrency ${config.WORKER_CONCURRENCY}`);
 
+  // One scheduler entry across all workers: BullMQ keeps a single repeating job, whoever upserts it.
+  const maintenance = new Queue(QUEUES.MAINTENANCE, { connection });
+  const maintenanceWorker = new Worker(
+    QUEUES.MAINTENANCE,
+    async (job) => {
+      if (job.name !== JOBS.RECONCILE_PULL_REQUESTS || !github) return { skipped: true };
+      return reconcilePullRequests(prisma, github, { staleAfterMs: config.PR_RECONCILE_STALE_SECONDS * 1000, limit: 100 });
+    },
+    { connection, concurrency: 1 },
+  );
+  if (github) {
+    await maintenance.upsertJobScheduler(
+      JOBS.RECONCILE_PULL_REQUESTS,
+      { every: config.PR_RECONCILE_INTERVAL_SECONDS * 1000 },
+      { name: JOBS.RECONCILE_PULL_REQUESTS, opts: { removeOnComplete: 100, removeOnFail: 100 } },
+    );
+  }
+  maintenanceWorker.on("failed", (job, err) => console.error(`[worker] maintenance job ${job?.name} failed: ${err.message}`));
+
   const shutdown = async () => {
     console.log("[worker] shutting down");
     await worker.close();
+    await maintenanceWorker.close();
+    await maintenance.close();
     await prisma.$disconnect();
     connection.disconnect();
     process.exit(0);
