@@ -159,6 +159,7 @@ model Repository {
   issues       Issue[]
   tasks        AgentTask[]
   snapshots    RepositorySnapshot[]
+  pullRequests PullRequest[]
 
   @@index([owner, name])
   @@index([installationId])
@@ -409,10 +410,11 @@ model Patch {
   status             PatchStatus @default(PROPOSED)
   createdAt          DateTime    @default(now()) @map("created_at")
 
-  task     AgentTask          @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  plan     ImplementationPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
-  run      AgentRun           @relation(fields: [runId], references: [id], onDelete: Cascade)
-  testRuns TestRun[]
+  task         AgentTask          @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  plan         ImplementationPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  run          AgentRun           @relation(fields: [runId], references: [id], onDelete: Cascade)
+  testRuns     TestRun[]
+  pullRequests PullRequest[]
 
   @@unique([taskId, version])
   @@index([taskId, diffHash])
@@ -464,19 +466,33 @@ model TestResult {
   @@map("test_results")
 }
 
+/// The draft PR opened for a task. A task opens at most one; webhooks and
+/// reconciliation keep its status in step with GitHub.
 model PullRequest {
-  id             String            @id @default(uuid()) @db.Uuid
-  taskId         String            @map("task_id") @db.Uuid
-  repositoryId   String            @map("repository_id") @db.Uuid
-  githubPrNumber Int               @map("github_pr_number")
-  githubPrUrl    String            @map("github_pr_url")
-  headSha        String            @map("head_sha")
-  status         PullRequestStatus @default(DRAFT)
-  createdAt      DateTime          @default(now()) @map("created_at")
+  id              String            @id @default(uuid()) @db.Uuid
+  taskId          String            @unique @map("task_id") @db.Uuid
+  repositoryId    String            @map("repository_id") @db.Uuid
+  /// The verified patch version that was pushed.
+  patchId         String?           @map("patch_id") @db.Uuid
+  githubPrNumber  Int               @map("github_pr_number")
+  githubPrUrl     String            @map("github_pr_url")
+  headSha         String            @map("head_sha")
+  branchName      String            @map("branch_name")
+  baseBranch      String            @map("base_branch")
+  status          PullRequestStatus @default(DRAFT)
+  /// GitHub's updated_at for the state stored here; older webhook deliveries are ignored.
+  githubUpdatedAt DateTime?         @map("github_updated_at")
+  mergedAt        DateTime?         @map("merged_at")
+  closedAt        DateTime?         @map("closed_at")
+  lastSyncedAt    DateTime?         @map("last_synced_at")
+  createdAt       DateTime          @default(now()) @map("created_at")
 
-  task AgentTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  task       AgentTask  @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  patch      Patch?     @relation(fields: [patchId], references: [id], onDelete: SetNull)
 
   @@unique([repositoryId, githubPrNumber])
+  @@index([status])
   @@map("pull_requests")
 }
 
