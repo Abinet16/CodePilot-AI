@@ -26,6 +26,7 @@ export interface RunOutcome {
 export class RunRecorder {
   constructor(
     private readonly prisma: PrismaClient,
+    /** Recorded on every usage row: "anthropic", "gemini", or "ollama". */
     private readonly provider = "anthropic",
   ) {}
 
@@ -49,6 +50,9 @@ export class RunRecorder {
     const run = await this.prisma.agentRun.findUniqueOrThrow({ where: { id: runId }, include: { task: { select: { requestedById: true } } } });
     const usage = outcome.usage;
     const served = outcome.servedModel ?? run.model;
+    // A served model missing from the price table (a fallback, or a dated Gemini version) is billed at the
+    // requested model's price. Local models have no price and cost nothing.
+    const priceAt = isPricedModel(served) ? served : isPricedModel(run.model) ? run.model : null;
 
     await this.prisma.$transaction(async (tx) => {
       await tx.agentRun.update({
@@ -70,8 +74,7 @@ export class RunRecorder {
           model: served,
           inputTokens: usage.inputTokens + usage.cacheCreationInputTokens + usage.cacheReadInputTokens,
           outputTokens: usage.outputTokens,
-          // A fallback model missing from the price table is billed at the requested model's price.
-          estimatedCost: estimateCostUsd(isPricedModel(served) ? served : run.model, usage),
+          estimatedCost: priceAt ? estimateCostUsd(priceAt, usage) : 0,
         },
       });
     });

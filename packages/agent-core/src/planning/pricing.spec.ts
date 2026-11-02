@@ -13,6 +13,11 @@ describe("estimateCostUsd", () => {
     expect(estimateCostUsd("claude-sonnet-5-5", cached)).toBe(2.7);
   });
 
+  it("prices Gemini models at their paid-tier list price", () => {
+    // 10k * $0.75/M + 2k * $3.75/M
+    expect(estimateCostUsd("gemini-3.8-flash", usage)).toBe(0.015);
+  });
+
   it("rounds to micro-dollars", () => {
     expect(estimateCostUsd("claude-haiku-5-5", { ...usage, inputTokens: 1, outputTokens: 1 })).toBe(0.000001);
   });
