@@ -3,6 +3,8 @@
 // and records every POST so tests can assert on what the UI sent.
 // Not for production: it has no authentication and no persistence.
 import { createServer } from "node:http";
+import process from "node:process";
+import { URL } from "node:url";
 
 const PORT = Number(process.env.FIXTURE_API_PORT ?? 4100);
 const SHA = "3f9ce46" + "a".repeat(33);
@@ -237,15 +239,17 @@ const GROUPS = {
 };
 const groupOf = (status) => Object.keys(GROUPS).find((g) => GROUPS[g].includes(status));
 
+/** The TaskSummary fields of a task, as the list endpoints return them. */
+const SUMMARY_FIELDS = ["id", "repositoryId", "repositoryFullName", "issueId", "title", "status", "baseSha", "branchName", "failureReason", "createdAt", "startedAt", "completedAt"];
+
 function listItem(task) {
-  const { description, issue, requirePlanApproval, analysis, plans, patches, checks, runs, usage, events, pullRequest, ...summary } = task;
-  void description, issue, requirePlanApproval, analysis, plans, patches, checks, runs, events;
+  const pr = task.pullRequest;
   return {
-    ...summary,
+    ...Object.fromEntries(SUMMARY_FIELDS.map((field) => [field, task[field]])),
     group: groupOf(task.status),
     updatedAt: task.events.at(-1)?.createdAt ?? task.createdAt,
-    pullRequest: pullRequest ? { number: pullRequest.number, url: pullRequest.url, status: pullRequest.status } : null,
-    estimatedCostUsd: usage.estimatedCostUsd,
+    pullRequest: pr ? { number: pr.number, url: pr.url, status: pr.status } : null,
+    estimatedCostUsd: task.usage.estimatedCostUsd,
   };
 }
 
@@ -382,4 +386,4 @@ createServer((req, res) => {
     const [status, payload] = route(req.method ?? "GET", url.pathname, url.searchParams, body);
     res.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(payload));
   });
-}).listen(PORT, () => console.log(`fixture API on http://localhost:${PORT}`));
+}).listen(PORT, () => process.stdout.write(`fixture API on http://localhost:${PORT}\n`));
