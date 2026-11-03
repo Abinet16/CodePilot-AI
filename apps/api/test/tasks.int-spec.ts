@@ -1,4 +1,16 @@
-import type { IssueSummary, PatchDetail, RepositoryChecks, RepositoryChecksResponse, RepositorySummary, TaskDetail, TaskJobKey, TaskSummary } from "@codepilot/contracts";
+import type {
+  DashboardResponse,
+  IssueSummary,
+  PatchDetail,
+  RepositoryChecks,
+  RepositoryChecksResponse,
+  RepositoryDetail,
+  RepositorySummary,
+  TaskDetail,
+  TaskJobKey,
+  TaskPage,
+  UsageReport,
+} from "@codepilot/contracts";
 import { taskJobId } from "@codepilot/contracts";
 import type { NestExpressApplication } from "@nestjs/platform-express";
 import { Test } from "@nestjs/testing";
@@ -169,15 +181,18 @@ describe("tasks API (PostgreSQL)", () => {
   it("lists and shows tasks only to users who can access the repository", async () => {
     const privateTask = (await alice.post("/api/tasks").send(describeTask(aliceOnly.id)).expect(201)).body as TaskDetail;
 
-    const aliceTasks = (await alice.get("/api/tasks").expect(200)).body as TaskSummary[];
-    const bobTasks = (await bob.get("/api/tasks").expect(200)).body as TaskSummary[];
+    const aliceTasks = ((await alice.get("/api/tasks?limit=100").expect(200)).body as TaskPage).items;
+    const bobTasks = ((await bob.get("/api/tasks?limit=100").expect(200)).body as TaskPage).items;
     expect(aliceTasks.some((t) => t.id === privateTask.id)).toBe(true);
     expect(bobTasks.some((t) => t.id === privateTask.id)).toBe(false);
     expect(bobTasks.length).toBeGreaterThan(0);
 
-    const filtered = (await alice.get(`/api/tasks?repositoryId=${aliceOnly.id}`).expect(200)).body as TaskSummary[];
-    expect(filtered.map((t) => t.id)).toEqual([privateTask.id]);
+    const filtered = (await alice.get(`/api/tasks?repositoryId=${aliceOnly.id}`).expect(200)).body as TaskPage;
+    expect(filtered.items.map((t) => t.id)).toEqual([privateTask.id]);
+    expect(filtered.items[0]).toMatchObject({ group: "active", pullRequest: null, estimatedCostUsd: 0 });
+    expect(filtered.nextCursor).toBeNull();
     await alice.get("/api/tasks?repositoryId=nope").expect(400);
+    await alice.get("/api/tasks?status=FAILED").expect(400);
 
     await bob.get(`/api/tasks/${privateTask.id}`).expect(404);
     await alice.get(`/api/tasks/${privateTask.id}`).expect(200);
@@ -558,6 +573,116 @@ describe("tasks API (PostgreSQL)", () => {
     });
     const detail = (await bob.get(`/api/tasks/${id}`).expect(200)).body as TaskDetail;
     expect(detail.pullRequest).toMatchObject({ url: "https://github.com/acme/shop/pull/4", status: "DRAFT", patchVersion: 1, baseBranch: "main", mergedAt: null });
+  });
+
+  it("pages tasks with a cursor and filters them by status group", async () => {
+    const created: string[] = [];
+    for (let i = 0; i < 3; i++) created.push(((await alice.post("/api/tasks").send(describeTask(aliceOnly.id)).expect(201)).body as TaskDetail).id);
+    await prisma.agentTask.update({ where: { id: created[0] }, data: { status: "FAILED", failureReason: "test" } });
+
+    const all = ((await alice.get(`/api/tasks?repositoryId=${aliceOnly.id}&limit=100`).expect(200)).body as TaskPage).items.map((t) => t.id);
+    const first = (await alice.get(`/api/tasks?repositoryId=${aliceOnly.id}&limit=2`).expect(200)).body as TaskPage;
+    expect(first.items.map((t) => t.id)).toEqual(all.slice(0, 2));
+    expect(first.nextCursor).toEqual(expect.any(String));
+    const second = (await alice.get(`/api/tasks?repositoryId=${aliceOnly.id}&limit=2&cursor=${first.nextCursor}`).expect(200)).body as TaskPage;
+    expect(second.items.map((t) => t.id)).toEqual(all.slice(2, 4));
+
+    const failed = (await alice.get(`/api/tasks?repositoryId=${aliceOnly.id}&group=failed`).expect(200)).body as TaskPage;
+    expect(failed.items.map((t) => t.id)).toContain(created[0]);
+    expect(failed.items.every((t) => t.group === "failed" && t.status === "FAILED")).toBe(true);
+
+    await alice.get("/api/tasks?cursor=bm90LWEtY3Vyc29y").expect(400);
+    await alice.get("/api/tasks?limit=0").expect(400);
+  });
+
+  it("summarizes the dashboard from tasks the user can see", async () => {
+    const reviewable = (await alice.post("/api/tasks").send(describeTask(aliceOnly.id)).expect(201)).body as TaskDetail;
+    await prisma.agentTask.update({ where: { id: reviewable.id }, data: { status: "AWAITING_PLAN_APPROVAL" } });
+
+    const mine = (await alice.get("/api/dashboard").expect(200)).body as DashboardResponse;
+    expect(mine.counts.review).toBeGreaterThanOrEqual(1);
+    expect(mine.needsReview.map((t) => t.id)).toContain(reviewable.id);
+    expect(mine.needsReview.every((t) => t.group === "review")).toBe(true);
+    expect(mine.recent.length).toBeLessThanOrEqual(10);
+    expect(Object.keys(mine.pullRequests).sort()).toEqual(["CLOSED", "DRAFT", "MERGED", "OPEN"]);
+    expect(mine.repositories.visible).toBeGreaterThanOrEqual(2);
+    expect(mine.usage.days).toBe(30);
+
+    // Bob cannot see Alice's private repository, so its tasks are not in his counts or lists.
+    const bobs = (await bob.get("/api/dashboard").expect(200)).body as DashboardResponse;
+    expect(bobs.needsReview.map((t) => t.id)).not.toContain(reviewable.id);
+    expect(bobs.recent.every((t) => t.repositoryId !== aliceOnly.id)).toBe(true);
+    await request(app.getHttpServer()).get("/api/dashboard").expect(401);
+  });
+
+  it("reports the user's own usage by day, model, provider, and repository", async () => {
+    const owner = await prisma.user.findFirstOrThrow({ where: { githubId: BigInt(ids.alice) } });
+    const task = (await alice.post("/api/tasks").send(describeTask(shared.id)).expect(201)).body as TaskDetail;
+    const model = `usage-model-${base}`;
+    const today = new Date();
+    const threeDaysAgo = new Date(today.getTime() - 3 * 24 * 60 * 60 * 1000);
+    for (const createdAt of [today, today, threeDaysAgo]) {
+      await prisma.usageRecord.create({
+        data: { userId: owner.id, taskId: task.id, provider: "ollama", model, inputTokens: 1_000, outputTokens: 200, estimatedCost: "0.001000", createdAt },
+      });
+    }
+
+    const report = (await alice.get("/api/usage?days=7").expect(200)).body as UsageReport;
+    expect(report.days).toBe(7);
+    expect(report.daily).toHaveLength(7);
+    expect(report.daily.at(-1)!.key).toBe(today.toISOString().slice(0, 10));
+    expect(report.byModel.find((m) => m.key === model)).toEqual({ key: model, inputTokens: 3_000, outputTokens: 600, estimatedCostUsd: 0.003, calls: 3 });
+    expect(report.byProvider.find((p) => p.key === "ollama")?.calls).toBeGreaterThanOrEqual(3);
+    expect(report.byRepository.map((r) => r.key)).toContain(shared.fullName);
+    expect(report.totals.calls).toBe(report.daily.reduce((n, d) => n + d.calls, 0));
+
+    // Usage is personal: Bob sees none of Alice's calls.
+    const bobs = (await bob.get("/api/usage?days=7").expect(200)).body as UsageReport;
+    expect(bobs.byModel.find((m) => m.key === model)).toBeUndefined();
+    await alice.get("/api/usage?days=0").expect(400);
+    await alice.get("/api/usage?days=91").expect(400);
+  });
+
+  it("shows a repository's index state, checks, issues, and task activity", async () => {
+    await prisma.repositorySettings.upsert({
+      where: { repositoryId: aliceOnly.id },
+      create: { repositoryId: aliceOnly.id, checks: [{ id: "test", kind: "test", executable: "pnpm", args: ["test"], timeoutMs: 60_000 }] },
+      update: { checks: [{ id: "test", kind: "test", executable: "pnpm", args: ["test"], timeoutMs: 60_000 }] },
+    });
+    await prisma.repositorySnapshot.upsert({
+      where: { repositoryId_commitSha: { repositoryId: aliceOnly.id, commitSha: SHA } },
+      create: {
+        repositoryId: aliceOnly.id,
+        commitSha: SHA,
+        profile: {
+          languages: { typescript: 1 },
+          primaryLanguage: "typescript",
+          supported: true,
+          packageManager: "pnpm",
+          typescript: true,
+          frameworks: [],
+          testFrameworks: ["Vitest"],
+          scripts: {},
+          monorepo: false,
+          instructionFiles: [],
+          testFileCount: 0,
+          directories: {},
+        },
+        stats: { indexedFiles: 12, indexedBytes: 100, skipped: {}, truncated: false },
+        paths: [],
+      },
+      update: {},
+    });
+
+    const detail = (await alice.get(`/api/repositories/${aliceOnly.id}`).expect(200)).body as RepositoryDetail;
+    expect(detail).toMatchObject({ id: aliceOnly.id, fullName: aliceOnly.fullName, checksConfigured: true });
+    expect(detail.latestSnapshot).toMatchObject({ commitSha: SHA, primaryLanguage: "typescript", packageManager: "pnpm", testFrameworks: ["Vitest"], indexedFiles: 12 });
+    expect(detail.recentTasks.length).toBeGreaterThan(0);
+    expect(detail.recentTasks.length).toBeLessThanOrEqual(5);
+    expect(detail.recentTasks.every((t) => t.repositoryId === aliceOnly.id)).toBe(true);
+    expect(Object.values(detail.taskCounts).reduce((a, b) => a + b, 0)).toBeGreaterThanOrEqual(detail.recentTasks.length);
+
+    await bob.get(`/api/repositories/${aliceOnly.id}`).expect(404);
   });
 
   it("removes pending resume jobs when a task under review is cancelled", async () => {
