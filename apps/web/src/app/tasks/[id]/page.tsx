@@ -165,7 +165,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
                   {task.patches.map((p) => (
                     <Link
                       key={p.version}
-                      href={`/tasks/${task.id}?patch=${p.version}#patch`}
+                      href={`/tasks/${task.id}?patch=${p.version}`}
                       aria-current={p.version === shownPatch.version ? "page" : undefined}
                       scroll={false}
                     >
