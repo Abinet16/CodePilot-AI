@@ -43,9 +43,7 @@ export default async function RepositoriesPage() {
             {repos.data.map((repo) => (
               <tr key={repo.id}>
                 <td>
-                  <a href={`https://github.com/${repo.fullName}`} target="_blank" rel="noreferrer">
-                    {repo.fullName}
-                  </a>
+                  <Link href={`/repositories/${repo.id}`}>{repo.fullName}</Link>
                   {repo.isPrivate && <span className="tag">private</span>}
                   {repo.installationStatus !== "ACTIVE" && <span className="tag bad">{repo.installationStatus.toLowerCase()}</span>}
                 </td>
