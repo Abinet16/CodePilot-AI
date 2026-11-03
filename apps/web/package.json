@@ -6,8 +6,8 @@
     "build": "next build",
     "dev": "next dev --port 3000",
     "start": "next start --port 3000",
-    "typecheck": "tsc --noEmit",
-    "test": "echo \"web: no unit tests yet (Playwright e2e lands in week 8)\""
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json",
+    "test": "jest"
   },
   "dependencies": {
     "@codepilot/contracts": "workspace:*",
@@ -17,8 +17,12 @@
     "server-only": "0.0.1"
   },
   "devDependencies": {
+    "@codepilot/config": "workspace:*",
+    "@types/jest": "29.5.14",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
+    "jest": "29.7.0",
+    "ts-jest": "29.4.15",
     "typescript": "5.9.3"
   }
 }
