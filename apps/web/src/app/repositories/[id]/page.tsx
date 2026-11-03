@@ -30,7 +30,11 @@ export default async function RepositoryPage({ params }: { params: Promise<{ id:
       <div className="heading-row">
         <h1>{repo.fullName}</h1>
         <span className="toggle">
-          <RepositoryToggle repository={repo} />
+          <RepositoryToggle
+            repository={repo}
+            canChange={hasPermission(repo.permission, MIN_PERMISSION_TO_ENABLE) && repo.installationStatus === "ACTIVE"}
+            reason={`Requires ${MIN_PERMISSION_TO_ENABLE.toLowerCase()} access and an active installation`}
+          />
           {canStart && (
             <Link className="button" href={`/tasks/new?repositoryId=${repo.id}`}>
               New task

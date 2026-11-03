@@ -1,7 +1,6 @@
 "use client";
 
 import type { CheckKind, RepositoryChecks, RepositoryChecksResponse } from "@codepilot/contracts";
-import { CHECK_KINDS } from "@codepilot/contracts";
 import { useState } from "react";
 
 interface Row {
@@ -41,16 +40,19 @@ function toConfig(form: FormState): RepositoryChecks {
   };
 }
 
+/** `kinds` comes from the server page, so this client bundle does not load @codepilot/contracts at runtime. */
 export function ChecksForm({
   repositoryId,
   configured,
   suggested,
   canEdit,
+  kinds,
 }: {
   repositoryId: string;
   configured: RepositoryChecks | null;
   suggested: RepositoryChecks | null;
   canEdit: boolean;
+  kinds: readonly CheckKind[];
 }) {
   const [form, setForm] = useState<FormState>(toForm(configured));
   const [pending, setPending] = useState(false);
@@ -127,7 +129,7 @@ export function ChecksForm({
         <div key={i} className="check-row">
           <input value={row.id} disabled={disabled} aria-label="Check id" placeholder="test" onChange={(e) => updateRow(i, { id: e.target.value })} />
           <select value={row.kind} disabled={disabled} aria-label="Check kind" onChange={(e) => updateRow(i, { kind: e.target.value as CheckKind })}>
-            {CHECK_KINDS.map((k) => (
+            {kinds.map((k) => (
               <option key={k}>{k}</option>
             ))}
           </select>

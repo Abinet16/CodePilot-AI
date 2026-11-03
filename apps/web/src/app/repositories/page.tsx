@@ -49,7 +49,11 @@ export default async function RepositoriesPage() {
                 </td>
                 <td>{repo.permission.toLowerCase()}</td>
                 <td>
-                  <RepositoryToggle repository={repo} />
+                  <RepositoryToggle
+                    repository={repo}
+                    canChange={hasPermission(repo.permission, MIN_PERMISSION_TO_ENABLE) && repo.installationStatus === "ACTIVE"}
+                    reason={`Requires ${MIN_PERMISSION_TO_ENABLE.toLowerCase()} access and an active installation`}
+                  />
                   {repo.enabled && repo.installationStatus === "ACTIVE" && hasPermission(repo.permission, MIN_PERMISSION_TO_ENABLE) && (
                     <Link className="small task-link" href={`/tasks/new?repositoryId=${repo.id}`}>
                       New task
