@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
-import type { RepositoryChecks, RepositoryChecksResponse } from "@codepilot/contracts";
+import type { RepositoryChecks, RepositoryChecksResponse, RepositoryDetail } from "@codepilot/contracts";
 import {
   IssueSummary,
   MIN_PERMISSION_TO_CONFIGURE_CHECKS,
@@ -14,6 +14,7 @@ import { Prisma } from "@prisma/client";
 import type { GithubInstallation, Repository, RepositoryAccess } from "@prisma/client";
 import { AuditService } from "../audit/audit.service";
 import { PrismaService } from "../prisma/prisma.service";
+import { TaskLister } from "../tasks/task-lister";
 
 type AccessRow = RepositoryAccess & { repository: Repository & { installation: GithubInstallation } };
 
@@ -41,6 +42,7 @@ export class RepositoriesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly lister: TaskLister,
   ) {}
 
   async listForUser(userId: string): Promise<RepositorySummary[]> {
@@ -50,6 +52,44 @@ export class RepositoriesService {
       orderBy: [{ repository: { owner: "asc" } }, { repository: { name: "asc" } }],
     });
     return rows.map(toSummary);
+  }
+
+  /** One repository with what its page needs: index state, checks, issues, and task activity. */
+  async getDetail(userId: string, repositoryId: string): Promise<RepositoryDetail> {
+    const access = await this.prisma.repositoryAccess.findUnique({
+      where: { userId_repositoryId: { userId, repositoryId } },
+      include: { repository: { include: { installation: true } } },
+    });
+    if (!access || access.repository.removedAt) throw new NotFoundException("Repository not found");
+
+    const [snapshot, settings, openIssues, taskCounts, recentTasks] = await Promise.all([
+      this.prisma.repositorySnapshot.findFirst({ where: { repositoryId }, orderBy: { indexedAt: "desc" } }),
+      this.prisma.repositorySettings.findUnique({ where: { repositoryId }, select: { checks: true } }),
+      this.prisma.issue.count({ where: { repositoryId, state: "OPEN" } }),
+      this.lister.counts(userId, { repositoryId }),
+      this.lister.items(userId, { repositoryId }, { createdAt: "desc" }, 5),
+    ]);
+    const profile = snapshot ? ProjectProfileSchema.safeParse(snapshot.profile) : null;
+    const stats = snapshot?.stats as { indexedFiles?: unknown } | undefined;
+
+    return {
+      ...toSummary(access),
+      latestSnapshot:
+        snapshot && profile?.success
+          ? {
+              commitSha: snapshot.commitSha,
+              indexedAt: snapshot.indexedAt.toISOString(),
+              primaryLanguage: profile.data.primaryLanguage,
+              packageManager: profile.data.packageManager,
+              testFrameworks: profile.data.testFrameworks,
+              indexedFiles: typeof stats?.indexedFiles === "number" ? stats.indexedFiles : 0,
+            }
+          : null,
+      checksConfigured: Array.isArray(settings?.checks) && settings.checks.length > 0,
+      openIssues,
+      taskCounts,
+      recentTasks,
+    };
   }
 
   async listOpenIssues(userId: string, repositoryId: string): Promise<IssueSummary[]> {
