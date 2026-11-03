@@ -4,13 +4,15 @@ import {
   ApprovePlanRequestSchema,
   CreateTaskRequest,
   CreateTaskRequestSchema,
+  ListTasksQuery,
+  ListTasksQuerySchema,
   OpenPullRequestRequest,
   OpenPullRequestRequestSchema,
   PatchDetail,
   RequestPlanChangesRequest,
   RequestPlanChangesRequestSchema,
   TaskDetail,
-  TaskSummary,
+  TaskPage,
 } from "@codepilot/contracts";
 import { AuthUser, CurrentUser, SessionGuard } from "../auth/session.guard";
 import { ZodBodyPipe } from "../common/zod-body.pipe";
@@ -27,11 +29,8 @@ export class TasksController {
   }
 
   @Get()
-  list(
-    @CurrentUser() user: AuthUser,
-    @Query("repositoryId", new ParseUUIDPipe({ optional: true })) repositoryId?: string,
-  ): Promise<TaskSummary[]> {
-    return this.tasks.list(user.id, repositoryId);
+  list(@CurrentUser() user: AuthUser, @Query(new ZodBodyPipe(ListTasksQuerySchema, "query")) query: ListTasksQuery): Promise<TaskPage> {
+    return this.tasks.list(user.id, query);
   }
 
   @Get(":id")

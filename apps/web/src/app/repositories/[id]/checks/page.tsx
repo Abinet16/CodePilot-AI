@@ -1,5 +1,5 @@
 import type { RepositoryChecksResponse, RepositorySummary } from "@codepilot/contracts";
-import { MIN_PERMISSION_TO_CONFIGURE_CHECKS } from "@codepilot/contracts";
+import { CHECK_KINDS, MIN_PERMISSION_TO_CONFIGURE_CHECKS } from "@codepilot/contracts";
 import { notFound, redirect } from "next/navigation";
 import { apiGet } from "@/lib/api";
 import { ChecksForm } from "./checks-form";
@@ -35,7 +35,7 @@ export default async function RepositoryChecksPage({ params }: { params: Promise
       {!configured && <p className="notice small">No checks are configured yet, so tasks on this repository stop at RUNNING_CHECKS.</p>}
       {!canEdit && <p className="muted small">Only people with {MIN_PERMISSION_TO_CONFIGURE_CHECKS.toLowerCase()} access on GitHub can change checks.</p>}
       <section className="card">
-        <ChecksForm repositoryId={id} configured={configured} suggested={suggested} canEdit={canEdit} />
+        <ChecksForm repositoryId={id} configured={configured} suggested={suggested} canEdit={canEdit} kinds={CHECK_KINDS} />
       </section>
     </>
   );

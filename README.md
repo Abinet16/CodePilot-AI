@@ -17,12 +17,13 @@ issue → analyze repo (pinned SHA) → structured plan → [human approves] →
 | `v0.2` | Structured plans and patch generation (week 4: Claude-generated plans, human plan review, runs and usage, timeouts, retries, cancellation; week 5: plan-bound patches committed on a task branch, versioned with their diff) | ✅ done |
 | `v0.3` | Sandboxed tests and bounded repair loop (week 6: maintainer-configured checks in isolated containers, per-patch results, bounded repairs) | ✅ done |
 | `v0.4` | Automated draft pull requests (week 7: reviewer-approved, idempotent push and draft PR with check evidence, webhook and scheduled sync of PR state) | ✅ done |
-| `v1.0` | Deployed, evaluated, documented product | ⏳ weeks 8–10 |
+| Week 8 | Developer dashboard: review queue, filtered and paged task list, repository pages, task progress and execution log, versioned diff viewer, usage reports, Playwright end-to-end tests | ✅ done |
+| `v1.0` | Deployed, evaluated, documented product | ⏳ weeks 9–10 |
 
 ## Repository layout
 
 ```
-apps/web               Next.js dashboard
+apps/web               Next.js dashboard (Playwright end-to-end tests in apps/web/e2e)
 apps/api               NestJS REST API (auth, GitHub App, webhooks, tasks)
 apps/worker            BullMQ consumer that drives the agent state machine
 packages/contracts     Task statuses + transitions, plan schema, queue payloads (zod)
@@ -49,7 +50,9 @@ pnpm dev                # web :3000, api :4000/api, worker
 
 Check `http://localhost:4000/api/health`, or open `http://localhost:3000` to see system status.
 
-With a repository enabled, start a task at `/tasks/new`. The worker pins the default branch's head commit, indexes it, and asks Claude for a structured implementation plan grounded in the code it found. The task page shows the plan, the files it touches and why, and the tokens and estimated cost of each model call. Approve the plan, or request changes and get a revised version (up to 3). Once approved, the worker implements the plan in a disposable checkout of the pinned commit, commits it on a `codepilot/…` branch, and the task page shows the commit, the files changed, and the diff.
+The **dashboard** (`/`) shows what is waiting for you (plans to approve, verified patches to review), what the agent is working on, open and merged PRs, and recent spend. **Tasks** can be filtered by status and repository; **Repositories** have their own page with index state, checks, and task activity; **Usage** charts model calls and cost by day, model, provider, and repository. Each task page shows a progress stepper with the time spent per stage, every plan and patch version, a per-file diff viewer, check output, the PR, an execution log, and every model call.
+
+With a repository enabled, start a task at `/tasks/new`. The worker pins the default branch's head commit, indexes it, and asks the model for a structured implementation plan grounded in the code it found. The task page shows the plan, the files it touches and why, and the tokens and estimated cost of each model call. Approve the plan, or request changes and get a revised version (up to 3). Once approved, the worker implements the plan in a disposable checkout of the pinned commit, commits it on a `codepilot/…` branch, and the task page shows the commit, the files changed, and the diff.
 
 Before tasks can be verified, build the sandbox image once (`pnpm sandbox:build`) and have a maintainer set the repository's checks under **Repositories → Checks** (detected suggestions are offered). After a patch, the worker rebuilds it in a fresh checkout, runs the install step and each check in isolated containers, and shows the results per patch version. Failing checks go back to the model for up to `MAX_REPAIR_ATTEMPTS` repairs within the approved plan. A task whose checks pass stops at `READY_FOR_REVIEW`. Review the diff and the check output, then **Open draft PR**: the worker pushes the verified patch to its `codepilot/…` branch and opens a draft pull request with the plan, files, check results, limitations, and an AI-authorship note. The PR's status (draft, open, merged, closed) stays current through webhooks and a scheduled reconciliation. The agent never merges.
 
@@ -74,7 +77,10 @@ pnpm lint
 pnpm typecheck
 pnpm test               # unit tests (no infrastructure needed)
 pnpm test:integration   # needs PostgreSQL from `pnpm infra:up`; container tests also need `pnpm sandbox:build`
+pnpm --filter @codepilot/web test:e2e   # builds the web app and runs Playwright against a fixture API (ports 3100/4100)
 ```
+
+The first end-to-end run needs a browser: `pnpm --filter @codepilot/web exec playwright install chromium`.
 
 CI (`.github/workflows/ci.yml`) runs all of the above, plus a schema-drift check and `pnpm audit`.
 

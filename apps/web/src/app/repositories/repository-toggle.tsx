@@ -1,15 +1,17 @@
 "use client";
 
 import type { RepositorySummary } from "@codepilot/contracts";
-import { MIN_PERMISSION_TO_ENABLE, hasPermission } from "@codepilot/contracts";
 import { useState } from "react";
 
-export function RepositoryToggle({ repository }: { repository: RepositorySummary }) {
+/**
+ * Enables or disables the agent on a repository. Whether the user may change
+ * it is decided by the server page and passed in, so this client bundle does
+ * not load @codepilot/contracts (and zod) at runtime.
+ */
+export function RepositoryToggle({ repository, canChange, reason }: { repository: RepositorySummary; canChange: boolean; reason?: string }) {
   const [enabled, setEnabled] = useState(repository.enabled);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const canChange = hasPermission(repository.permission, MIN_PERMISSION_TO_ENABLE) && repository.installationStatus === "ACTIVE";
 
   async function toggle() {
     setPending(true);
@@ -29,12 +31,7 @@ export function RepositoryToggle({ repository }: { repository: RepositorySummary
 
   return (
     <span className="toggle">
-      <button
-        className={enabled ? "button" : "button secondary"}
-        disabled={!canChange || pending}
-        title={canChange ? undefined : `Requires ${MIN_PERMISSION_TO_ENABLE.toLowerCase()} access and an active installation`}
-        onClick={toggle}
-      >
+      <button className={enabled ? "button" : "button secondary"} disabled={!canChange || pending} title={canChange ? undefined : reason} onClick={toggle}>
         {enabled ? "Enabled" : "Disabled"}
       </button>
       {error && <span className="bad small">{error}</span>}

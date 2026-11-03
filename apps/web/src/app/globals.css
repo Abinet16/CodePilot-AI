@@ -308,42 +308,13 @@ h2 {
   border-top: 1px solid var(--border);
 }
 
-.diff {
-  overflow-x: auto;
-  max-height: 640px;
-  font-size: 12px;
-  line-height: 1.5;
-  padding: 12px 0;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-}
-
-.diff span {
-  display: block;
-  min-height: 1.5em;
-  padding: 0 12px;
-  white-space: pre;
-}
-
-.diff-file {
-  font-weight: 600;
-  margin-top: 8px;
-}
-
-.diff-meta,
-.diff-hunk {
-  color: var(--muted);
-}
-
-.diff-add {
-  color: var(--ok);
-  background: color-mix(in srgb, var(--ok) 10%, transparent);
-}
-
-.diff-del {
-  color: var(--bad);
-  background: color-mix(in srgb, var(--bad) 10%, transparent);
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 
 .form label.inline {
@@ -367,4 +338,339 @@ h2 {
 
 .check-row input[type="number"] {
   width: 72px;
+}
+
+/* --- Navigation --- */
+
+.topbar nav a:not(.brand) {
+  text-decoration: none;
+  color: var(--muted);
+  padding: 4px 2px;
+  border-bottom: 2px solid transparent;
+}
+
+.topbar nav a:not(.brand):hover {
+  color: var(--fg);
+}
+
+.topbar nav a[aria-current="page"] {
+  color: var(--fg);
+  border-bottom-color: var(--fg);
+}
+
+.page.wide {
+  max-width: 1040px;
+}
+
+/* --- Stats --- */
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.stat {
+  display: block;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 16px;
+  background: var(--surface);
+  text-decoration: none;
+}
+
+a.stat:hover {
+  border-color: var(--fg);
+}
+
+.stat strong {
+  display: block;
+  font-size: 24px;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* --- Tabs and filters --- */
+
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tabs a {
+  padding: 6px 10px;
+  text-decoration: none;
+  color: var(--muted);
+  font-size: 14px;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.tabs a[aria-current="page"] {
+  color: var(--fg);
+  border-bottom-color: var(--fg);
+}
+
+.tabs .count {
+  margin-left: 6px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 14px;
+}
+
+.filters select {
+  font: inherit;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.pager {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 16px;
+  font-size: 14px;
+}
+
+.empty {
+  padding: 24px 16px;
+  text-align: center;
+  color: var(--muted);
+}
+
+.table td.num,
+.table th.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.attention {
+  border-left: 3px solid var(--fg);
+}
+
+/* --- Progress stepper --- */
+
+.stepper {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
+  gap: 4px;
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.stepper li {
+  padding: 8px 6px 6px;
+  border-top: 3px solid var(--border);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.stepper li strong {
+  display: block;
+  font-weight: 500;
+  font-size: 13px;
+}
+
+.stepper li[data-state="done"] {
+  border-top-color: var(--ok);
+  color: var(--fg);
+}
+
+.stepper li[data-state="current"] {
+  border-top-color: var(--fg);
+  color: var(--fg);
+}
+
+.stepper li[data-state="current"] strong::after {
+  content: " ●";
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.stepper li[data-state="failed"],
+.stepper li[data-state="cancelled"] {
+  border-top-color: var(--bad);
+  color: var(--bad);
+}
+
+.stepper li[data-state="skipped"] {
+  border-top-style: dashed;
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stepper li[data-state="current"] strong::after {
+    animation: none;
+  }
+}
+
+/* --- Diff viewer --- */
+
+.diff-files {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.diff-file-box {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.diff-file-box > summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 12px;
+  background: var(--bg);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.diff-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.diff-scroll {
+  overflow-x: auto;
+  max-height: 560px;
+}
+
+.diff-table td {
+  padding: 0 8px;
+  white-space: pre;
+  vertical-align: top;
+}
+
+.diff-table td.ln {
+  width: 1%;
+  min-width: 40px;
+  text-align: right;
+  color: var(--muted);
+  user-select: none;
+  border-right: 1px solid var(--border);
+}
+
+.diff-table tr.hunk td {
+  color: var(--muted);
+  background: var(--bg);
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+.diff-table tr.add td.code {
+  background: color-mix(in srgb, var(--ok) 12%, transparent);
+}
+
+.diff-table tr.del td.code {
+  background: color-mix(in srgb, var(--bad) 12%, transparent);
+}
+
+.diff-table tr.note td.code {
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* --- Execution log --- */
+
+.log {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  font-size: 13px;
+}
+
+.log li {
+  display: grid;
+  grid-template-columns: 76px 1fr;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.log time {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.log .detail {
+  display: block;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.log li.bad .title {
+  color: var(--bad);
+}
+
+.log li.ok .title {
+  color: var(--ok);
+}
+
+/* --- Usage bars --- */
+
+.bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 120px;
+  margin-top: 16px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.bars div {
+  flex: 1;
+  min-width: 2px;
+  background: var(--fg);
+  opacity: 0.75;
+  border-radius: 2px 2px 0 0;
+}
+
+.bars div[data-empty="true"] {
+  background: var(--border);
+  opacity: 1;
+}
+
+.bar-axis {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.grid-2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 0 24px;
 }

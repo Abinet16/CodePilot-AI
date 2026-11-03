@@ -28,6 +28,7 @@ Handled events: `ping`, `installation` (created, deleted, suspend, unsuspend), `
 | Method | Path | Auth | Description |
 | --- | --- | --- | --- |
 | GET | `/repositories` | session | `RepositorySummary[]` the user can access on GitHub |
+| GET | `/repositories/:id` | session | `RepositoryDetail`: the summary plus the latest indexed commit (language, package manager, test frameworks, file count), whether checks are configured, open issue count, task counts per status group, and the 5 newest tasks. `404` without access. |
 | GET | `/repositories/:id/issues` | session | Open `IssueSummary[]` imported via webhooks (newest first, max 100). `404` without access. |
 | GET | `/repositories/:id/checks` | session | `RepositoryChecksResponse`: the saved install step and ordered checks (`configured`, or `null`), a `suggested` configuration from the latest indexed commit's package.json script names, who changed it last, and `canEdit`. `404` without access. |
 | PUT | `/repositories/:id/checks` | session, MAINTAIN+ | Body `RepositoryChecks` (strict): `{ install: CommandProfile \| null, checks: CheckProfile[] }` (1–10 checks). Validated by the command policy: allowlisted executables, no shell metacharacters, timeouts up to 15 minutes, unique ids, and an install step that is `npm|pnpm|yarn install|ci` with `--ignore-scripts` or `--mode=skip-build`. `400` with the policy message, `403` below MAINTAIN, `404` without access. Audited as `repository.checks_updated`. |
@@ -38,7 +39,7 @@ Handled events: `ping`, `installation` (created, deleted, suspend, unsuspend), `
 | Method | Path | Auth | Description |
 | --- | --- | --- | --- |
 | POST | `/tasks` | session, WRITE+ | Body `{ repositoryId, issueId?, description?, requirePlanApproval? }` (strict; an issue or a description of 10+ characters is required). Creates a `QUEUED` task and enqueues `{ taskId }`. `404` without access or for an issue from another repository, `403` below WRITE, `409` if the repository is not enabled, its installation is inactive, or the issue is closed, `503` if the queue is unavailable (the task is marked `FAILED`). Returns `TaskDetail` (`201`). |
-| GET | `/tasks?repositoryId=` | session | Newest 50 `TaskSummary[]` on repositories the user can access, optionally filtered |
+| GET | `/tasks?repositoryId=&group=&cursor=&limit=` | session | `TaskPage` `{ items, nextCursor }`: tasks on repositories the user can access, newest first. `group` is a status group (`review`, `active`, `done`, `failed`, `cancelled`); `limit` is 1–100 (default 25); `cursor` is the previous page's opaque `nextCursor`. Each item adds its `group`, last activity (`updatedAt`), PR (`number`, `url`, `status`), and estimated cost. Unknown parameters, groups, or malformed cursors are `400`. |
 | GET | `/tasks/:id` | session | `TaskDetail`: status, pinned `baseSha`, the `analysis` context package once ANALYZING completes, every plan version (`plans`, oldest first), every patch attempt (`patches`, oldest first, without diffs), every sandbox verification with per-check results (`checks`), the draft PR once opened (`pullRequest`, kept current by webhooks and reconciliation), model calls (`runs`), token and cost totals (`usage`), and the event history. A stored plan that no longer validates is returned with `plan: null`. `404` without access. |
 | GET | `/tasks/:id/patches/:version` | session | `PatchDetail`: one patch attempt with its unified `diff` against `baseSha`, plus the commit, tree, branch, per-file stats, and planned files left unchanged. The task detail lists every attempt in `patches` without diffs. `404` without access or for an unknown version, `400` for a non-numeric version. |
 | POST | `/tasks/:id/pull-request` | session, WRITE+ | Body `{ "patchVersion": n }` (strict). The human gate before anything leaves the worker: moves `READY_FOR_REVIEW → OPENING_PR` and enqueues the job that pushes patch `n` to its `codepilot/…` branch and opens a **draft** PR. `409` if the task is not ready for review or `n` is not the latest verified patch (compare-and-set, so a second click gets `409`), `503` if the queue is unavailable. Audited as `pull_request.requested`. |
@@ -47,6 +48,13 @@ Handled events: `ping`, `installation` (created, deleted, suspend, unsuspend), `
 | POST | `/tasks/:id/plan/request-changes` | session, WRITE+ | Body `{ "version": n, "feedback": string }` (strict, feedback 10–4000 characters). Marks the plan `CHANGES_REQUESTED`, moves the task back to `PLANNING`, and enqueues it; the worker writes version `n + 1` with the feedback. `409` as for approve, or when `n` is already the last allowed version (3). Audited as `plan.changes_requested`. |
 
 A task the user cannot see is reported as `404`, exactly like a task that does not exist.
+
+## Dashboard and usage
+
+| Method | Path | Auth | Description |
+| --- | --- | --- | --- |
+| GET | `/dashboard` | session | `DashboardResponse`: task counts per status group, the review queue (tasks awaiting plan approval or PR review, oldest first, max 10), the 10 newest tasks, PR counts by status, visible and enabled repositories, and the user's model usage over the last 30 days. Built from the same visibility rule as `/tasks`. |
+| GET | `/usage?days=` | session | `UsageReport` for the signed-in user's own model calls over `days` (1–90, default 30) whole UTC days: totals, one entry per day (empty days included), and breakdowns by model, provider, and repository. Costs are list-price estimates. |
 
 ## Status codes
 

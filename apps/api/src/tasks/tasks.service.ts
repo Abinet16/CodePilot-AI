@@ -4,6 +4,7 @@ import type {
   ContextPackage,
   CreateTaskRequest,
   CheckResultSummary,
+  ListTasksQuery,
   ImplementationPlan,
   PatchDetail,
   PatchFileStat,
@@ -13,7 +14,7 @@ import type {
   TaskDetail,
   TestRunSummary,
   TaskJobKey,
-  TaskSummary,
+  TaskPage,
   UsageTotals,
 } from "@codepilot/contracts";
 import {
@@ -29,42 +30,17 @@ import type {
   AgentRun,
   AgentTask,
   ImplementationPlan as PlanRow,
-  Issue,
   Patch,
   Prisma,
   PullRequest,
-  Repository,
   TaskEvent,
   TestResult,
   TestRun,
 } from "@prisma/client";
 import { AuditService } from "../audit/audit.service";
 import { PrismaService } from "../prisma/prisma.service";
+import { TaskLister, TaskRow, toSummary, visibleTasks } from "./task-lister";
 import { TaskQueue } from "./task-queue";
-
-type TaskRow = AgentTask & { repository: Repository; issue: Issue | null };
-
-function title(task: TaskRow): string {
-  if (task.issue) return `#${task.issue.githubIssueNumber} ${task.issue.title}`;
-  return (task.description ?? "").split("\n")[0]!.slice(0, 120);
-}
-
-function toSummary(task: TaskRow): TaskSummary {
-  return {
-    id: task.id,
-    repositoryId: task.repositoryId,
-    repositoryFullName: `${task.repository.owner}/${task.repository.name}`,
-    issueId: task.issueId,
-    title: title(task),
-    status: task.status,
-    baseSha: task.baseSha,
-    branchName: task.branchName,
-    failureReason: task.failureReason,
-    createdAt: task.createdAt.toISOString(),
-    startedAt: task.startedAt?.toISOString() ?? null,
-    completedAt: task.completedAt?.toISOString() ?? null,
-  };
-}
 
 type PatchRow = Omit<Patch, "patchContent"> & { plan: { version: number } };
 
@@ -219,6 +195,7 @@ export class TasksService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly queue: TaskQueue,
+    private readonly lister: TaskLister,
   ) {}
 
   async create(userId: string, request: CreateTaskRequest): Promise<TaskDetail> {
@@ -261,19 +238,13 @@ export class TasksService {
     return this.get(userId, task.id);
   }
 
-  async list(userId: string, repositoryId?: string): Promise<TaskSummary[]> {
-    const tasks = await this.prisma.agentTask.findMany({
-      where: { repository: { removedAt: null, access: { some: { userId } } }, ...(repositoryId ? { repositoryId } : {}) },
-      include: { repository: true, issue: true },
-      orderBy: { createdAt: "desc" },
-      take: 50,
-    });
-    return tasks.map(toSummary);
+  list(userId: string, query: ListTasksQuery): Promise<TaskPage> {
+    return this.lister.page(userId, query);
   }
 
   async get(userId: string, taskId: string): Promise<TaskDetail> {
     const task = await this.prisma.agentTask.findFirst({
-      where: { id: taskId, repository: { removedAt: null, access: { some: { userId } } } },
+      where: { id: taskId, ...visibleTasks(userId) },
       include: detailInclude,
     });
     if (!task) throw new NotFoundException("Task not found");

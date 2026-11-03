@@ -4,6 +4,7 @@ import {
   RepositoryChecks,
   RepositoryChecksResponse,
   RepositoryChecksSchema,
+  RepositoryDetail,
   RepositorySummary,
   UpdateRepositoryRequest,
   UpdateRepositoryRequestSchema,
@@ -20,6 +21,11 @@ export class RepositoriesController {
   @Get()
   list(@CurrentUser() user: AuthUser): Promise<RepositorySummary[]> {
     return this.repositories.listForUser(user.id);
+  }
+
+  @Get(":id")
+  detail(@CurrentUser() user: AuthUser, @Param("id", new ParseUUIDPipe()) id: string): Promise<RepositoryDetail> {
+    return this.repositories.getDetail(user.id, id);
   }
 
   @Get(":id/issues")

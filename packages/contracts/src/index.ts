@@ -3,6 +3,7 @@ export * from "./plan";
 export * from "./patch";
 export * from "./checks";
 export * from "./pull-request";
+export * from "./dashboard";
 export * from "./api";
 export * from "./queue";
 export * from "./repositories";

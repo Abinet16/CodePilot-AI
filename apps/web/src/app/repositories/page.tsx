@@ -43,15 +43,17 @@ export default async function RepositoriesPage() {
             {repos.data.map((repo) => (
               <tr key={repo.id}>
                 <td>
-                  <a href={`https://github.com/${repo.fullName}`} target="_blank" rel="noreferrer">
-                    {repo.fullName}
-                  </a>
+                  <Link href={`/repositories/${repo.id}`}>{repo.fullName}</Link>
                   {repo.isPrivate && <span className="tag">private</span>}
                   {repo.installationStatus !== "ACTIVE" && <span className="tag bad">{repo.installationStatus.toLowerCase()}</span>}
                 </td>
                 <td>{repo.permission.toLowerCase()}</td>
                 <td>
-                  <RepositoryToggle repository={repo} />
+                  <RepositoryToggle
+                    repository={repo}
+                    canChange={hasPermission(repo.permission, MIN_PERMISSION_TO_ENABLE) && repo.installationStatus === "ACTIVE"}
+                    reason={`Requires ${MIN_PERMISSION_TO_ENABLE.toLowerCase()} access and an active installation`}
+                  />
                   {repo.enabled && repo.installationStatus === "ACTIVE" && hasPermission(repo.permission, MIN_PERMISSION_TO_ENABLE) && (
                     <Link className="small task-link" href={`/tasks/new?repositoryId=${repo.id}`}>
                       New task
