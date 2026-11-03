@@ -4,10 +4,11 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { apiGet } from "@/lib/api";
 import "./globals.css";
+import { NavLink } from "./nav-link";
 import { SignOutButton } from "./sign-out-button";
 
 export const metadata: Metadata = {
-  title: "CodePilot AI",
+  title: { default: "CodePilot AI", template: "%s · CodePilot AI" },
   description: "Repository-aware AI coding agent with controlled execution and human review.",
 };
 
@@ -22,8 +23,14 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
             <Link href="/" className="brand">
               CodePilot AI
             </Link>
-            {me.ok && <Link href="/repositories">Repositories</Link>}
-            {me.ok && <Link href="/tasks">Tasks</Link>}
+            {me.ok && (
+              <>
+                <NavLink href="/">Dashboard</NavLink>
+                <NavLink href="/tasks">Tasks</NavLink>
+                <NavLink href="/repositories">Repositories</NavLink>
+                <NavLink href="/usage">Usage</NavLink>
+              </>
+            )}
           </nav>
           {me.ok ? (
             <div className="user">
@@ -36,7 +43,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
             </a>
           )}
         </header>
-        <main className="page">{children}</main>
+        <main className="page wide">{children}</main>
       </body>
     </html>
   );
